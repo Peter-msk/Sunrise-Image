@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local IDE and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Runtime and Windows build outputs
+build/
+dist/
+release/
+Windows_결과/
+*.spec
+*.log
+!verification/unit_tests.log
+
+# Local diagnostic and temporary outputs
+SunriseImage/Diagnostics/
+*.tmp
+*.bak
