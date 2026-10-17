@@ -1,2 +1,0 @@
-# Sunrise-Image
-Sunrise Image
