@@ -11,13 +11,13 @@
     "windows_native_verified": false,
     "windows_release_archive_verified": false,
     "method": "Full unittest run followed by targeted verification of small final edits; see 코드보완_결과.md",
-    "build_fix_note": "Original full tests are historical; build-log diagnostics and Qt exclusion regression tests verified separately on Linux. Windows EXE build and runtime must be verified on Windows."
+    "build_fix_note": "R02: Windows COLLECT error diagnosed from 02_pyinstaller.log; narrow PyMuPDF collection, isolated staging, previous-dist preservation. Windows build/runtime not yet verified."
   },
   "sha256": {
     "EXE_빌드.bat": "a67fc4e1ae130368431fe137874ea86ab04f980606b8e12d7a269e4fde25fd24",
     "THIRD_PARTY_NOTICES.md": "112d5799d35e3d978bfc74f18409d625ad614701daa40723a77ad52091eb150d",
     "UI_오류_분석_및_수정보고서.md": "3e9d99d79a1f43ab480f4b52dd9347dcef0b48a051a3b8d581a5cd691756ce33",
-    "Windows_배포안내.md": "3d6d2563d762acfeb6d8e0a29c1cc640cbd1d56f9aa4aec1d50e571fd79ae25a",
+    "Windows_배포안내.md": "48636f3005a3d8c4f7c9a36982d28613df5ebed81f07a32b6f48a1241a273519",
     "Windows_실행확인.bat": "613e43e855686e1b07e7befe4ca571dbcac3b0d42af59d2905a0bf10c34e1dd0",
     "app_entry.py": "04e0b458da1a37e8d71ae1b253065393c2964014f794df6c654333358e211b44",
     "assets/check.svg": "489ab73d94ebb0100b0f316614ff7749a2dcf4c99c8f0cf41406299c5a697f88",
@@ -26,7 +26,7 @@
     "assets/sunrise_image.ico": "aba5fb494405a878267fb70b7351b1378a9185001619ab174a5fb6e45811e895",
     "benchmarks/extraction_speed.py": "f96bb15f92643eee0dcc020e8eb9fd552c04494eff46ad2bcbd0ed7e7ea5f3b9",
     "benchmarks/성능측정.json": "6255ee9464d0c47871df1a294b76506fad466845de3d74fba2f9634c572415ab",
-    "build_windows.py": "2dc25629a1c8affef07277c2bed7b735470d7b171da0e8cd0ef2e3e3af052c68",
+    "build_windows.py": "b1b8b60fffb7fbc6382b743b3fc5b51ed61133f03f5de731bf5e4d4943bdae9f",
     "document_optimizer.py": "fa2c3c8273d12e211a5fbae1d55312ea3788cf40e0029d269ec655d53afbfe08",
     "document_reader.py": "395ce2e4d040ad8e7f078ae90760eefbf503bdc086b54bcee872c77457b564e8",
     "hwpx_image_extractor.py": "1ec0e1019127d79fde7ea9e673e3303411314261806ca6c2334758cefb827b35",
@@ -37,7 +37,7 @@
     "requirements.txt": "caf6e1677778cd94daf62254d4bd32e82d6a6e4a69e945739fc6c4807aebb126",
     "runtime_check.py": "70bc59137313f7f8697e37eee485827dab84dc3108c98f6f8ccb33e568e3fac2",
     "tests/fixtures.py": "85cf37a736d98e5035f67297c2dfc37ed1856cbf658b08947e5c1c75d041fa9b",
-    "tests/test_build.py": "3622f5d674d4e96d5a69cd33d694c2c5995dbc381596e40651e34ae359755a4a",
+    "tests/test_build.py": "67dac5ee8c0b930d135037a46406ad22c71101add571ca8d052bb2ca6375c9bc",
     "tests/test_corrective.py": "479ea8fdec508e9145f0683a760a0d9a8f1467a2233811dbc26615973e340db6",
     "tests/test_documents.py": "87a93fd9cfbd7bb1eaded59dfb01146a1c0505abf40779121d41cb31ed831d21",
     "tests/test_engine.py": "195a7b9274cd65e66714bbdb62ecf1ff3690114af666e91416762745c0933136",
@@ -68,6 +68,8 @@
     "화면예시/3_추출완료_결과요약.png": "6ab365199a8f6c7ac4150bfd137192644cec749e873c79fa696dee498cfc1795",
     "화면예시/4_드롭다운_가독성개선.png": "d1a1ac55e9847c6e69e70765e2d72d38063ce4525f5c6dd99cd99c9d77ec6686",
     "사용설명서.md": "e12c122aa84ef346b68121350f2acb7f51dd5c0395c9eea74e53fa32ef868673",
-    "작업인수인계서.md": "bfb0a0b8d1d4fcc687b24941fd8ec56b2e126cd0cc58550aa0feed46de1cb18e"
+    "작업인수인계서.md": "bfb0a0b8d1d4fcc687b24941fd8ec56b2e126cd0cc58550aa0feed46de1cb18e",
+    "README.md": "1aa16bd651b878c960b2822ece185bc813474926eb0f740ff1a60a81ab74c521",
+    "빌드오류_수정내역_R02.md": "7b434dde96b288ffc95a4c56b8e9b70e9ffc9f520049a121bf2536d8fb472b48"
   }
 }

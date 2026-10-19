@@ -30,6 +30,18 @@
 
 `SOURCE_AUDIT.json`에 기록한 소스 해시가 일치하면 기존 기능 검증 PASS를 재사용하고 전체 단위·통합 테스트를 반복하지 않습니다. 빌드에서는 필요한 라이브러리 설치, EXE 생성, **Windows에서만 확인할 수 있는 동결 런타임 실행**을 수행합니다. 해당 실행이 PASS여야 휴대용 배포 ZIP을 생성합니다.
 
+## R02: COLLECT 단계에서 matplotlib/back.pdf 접근 거부가 발생하는 경우
+
+실제 Windows 로그는 `SunriseImage.exe` 파일 생성 성공 후 **COLLECT 리소스 복사**에서 `PermissionError: [Errno 13]`이 발생했음을 보여줍니다. 빌드 과정의 `--collect-all pymupdf`로 인해 사용하지 않는 `matplotlib`, `pandas`, `pytest`까지 수집되어 오류 파일 `matplotlib/mpl-data/images/back.pdf`가 포함된 것을 확인했습니다.
+
+R02는 필요한 PyMuPDF 네이티브 모듈만 수집(`--collect-binaries pymupdf`)하고, 이 프로그램에서 사용하지 않는 Matplotlib·Pandas·pytest 수집을 제외합니다. 원본 `dist/SunriseImage`를 빌드 중에 덮어쓰지 않고 `Windows_결과/build_staging/` 하위 별도 경로로 먼저 빌드합니다. **동결 실행 검사, 라이선스 동봉 및 ZIP 준비가 완료된 후에만 기존 `dist`를 교체**합니다. 교체 실패 시 이전 배포본을 보존하거나 복구하고, 상세 오류를 결과 JSON에 기록합니다.
+
+- 권한 오류는 이전 실행 파일의 점유·보안 소프트웨어·디렉터리 ACL 등으로도 발생할 수 있으므로 정확한 잠금 원인은 로그만으로 단정할 수 없습니다.
+- 기존 실행 중 프로그램은 종료한 후 빌드하세요. 소스 전체 삭제, 관리자 권한 상시 실행, 백신 비활성화는 필요조건이 아닙니다.
+- 기존 결과를 무조건 삭제하거나 강제 재빌드하지 않습니다. 검사 통과한 기존 소스 해시는 재사용하고, 캐시 전면 삭제(`--clean`)도 수행하지 않습니다.
+- 의존성 로그에 남아 있는 구버전 `PySide6`/`PySide6-Addons`와 `PySide6-Essentials` 간 충돌은 경고만 표시하고, 다른 프로젝트의 전역 Python 패키지를 자동으로 제거하지 않습니다. 이후 GUI 런타임에서 문제가 재현되면 사용 환경별 격리 구성을 검토하세요.
+- 빌드 성공 판정은 `Windows_결과/WINDOWS_BUILD_RESULT.json`의 `status=PASS`, `windows_runtime=PASS`, `archive=PASS` 및 실제 실행/ZIP 검사를 기준으로 합니다.
+
 ## PyInstaller 단계에서 실패한 경우 (오류 표시 강화)
 
 `EXE_빌드.bat`는 **64비트 Python 3.12**가 설치되어 있으면 이를 우선 사용합니다. 별도 가상환경을 생성하지 않으며, 현재 선택된 Python에 정확한 버전의 요구 라이브러리가 이미 설치돼 있으면 재설치를 건너뜁니다.

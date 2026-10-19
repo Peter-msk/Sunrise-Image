@@ -78,7 +78,14 @@ class BuildTests(unittest.TestCase):
             root=Path(t);audit,dist=self._existing_exe(root);calls=[]
             def command(args,log):
                 calls.append((args,log))
+                if log=='02_pyinstaller.log':
+                    built=Path(args[args.index('--distpath')+1])/'SunriseImage'
+                    built.mkdir(parents=True)
+                    (built/'SunriseImage.exe').write_bytes(b'new-exe')
+                    (built/'_internal').mkdir()
+                    (built/'_internal/library.bin').write_bytes(b'fresh-lib')
                 if log=='03_runtime.log':
+                    self.assertEqual(Path(args[0]).read_bytes(),b'new-exe')
                     (audit/'WINDOWS_RUNTIME_CHECK.json').write_text(json.dumps({'status':'PASS','windows_verified':True,'frozen':True,'program':'Sunrise Image'}))
             def licenses(dest):dest.mkdir(exist_ok=True);(dest/'LICENSE.txt').write_text('license')
             with patch.object(build_windows,'ROOT',root),patch.object(build_windows,'AUDIT',audit),patch.object(build_windows,'DIST',dist),patch.object(build_windows.platform,'system',return_value='Windows'),patch.object(build_windows.sys,'version_info',(3,12,0)),patch.object(build_windows,'_dependencies_ready',return_value=True),patch.object(build_windows,'command',command),patch.object(build_windows,'collect_licenses',licenses),patch('builtins.print'):
@@ -89,11 +96,19 @@ class BuildTests(unittest.TestCase):
             self.assertIn('02_pyinstaller.log',logs)
             self.assertIn('03_runtime.log',logs)
             build_args=next(args for args,log in calls if log=='02_pyinstaller.log')
-            self.assertIn('--collect-all',build_args)
+            self.assertNotIn('--collect-all',build_args)
+            self.assertIn('--collect-binaries',build_args)
             self.assertIn('pymupdf',build_args)
+            self.assertIn('--distpath',build_args)
+            for excluded in ('matplotlib','pandas','pytest'):
+                self.assertIn(excluded,build_args)
             for qt in ('PyQt5','PyQt6','PySide2'):
                 self.assertIn(qt,build_args)
             self.assertNotIn('--clean',build_args)  # No duplicate clean rebuild by default.
+            self.assertEqual((dist/'SunriseImage.exe').read_bytes(),b'new-exe')
+            self.assertEqual((dist/'_internal/library.bin').read_bytes(),b'fresh-lib')
+            with zipfile.ZipFile(root/'release/Sunrise_Image_WINDOWS_x64.zip') as z:
+                self.assertEqual(z.read('SunriseImage/SunriseImage.exe'),b'new-exe')
 
     def test_subprocess_error_is_visible_and_retained_in_log(self):
         with tempfile.TemporaryDirectory() as t:
@@ -117,6 +132,55 @@ class BuildTests(unittest.TestCase):
             self.assertIn('\ufffd',build_windows._log_tail(log))
         self.assertIn('파일 사용 중',build_windows._failure_hint('02_pyinstaller.log','PermissionError: [WinError 32]'))
         self.assertIn('모듈 누락',build_windows._failure_hint('02_pyinstaller.log',"ModuleNotFoundError: No module named 'foo'"))
+
+    def test_promotion_denied_keeps_previous_distribution(self):
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t);existing=root/'dist/SunriseImage';existing.mkdir(parents=True)
+            (existing/'SunriseImage.exe').write_bytes(b'old-exe')
+            stage=root/'stage/SunriseImage';stage.mkdir(parents=True)
+            (stage/'SunriseImage.exe').write_bytes(b'new-exe')
+            with patch.object(build_windows.Path,'rename',autospec=True) as rename:
+                def deny_old_move(path,target):
+                    if path == existing:
+                        raise PermissionError('locked old file')
+                    return path.rename(target)
+                rename.side_effect=deny_old_move
+                with self.assertRaisesRegex(RuntimeError,'교체할 수 없습니다'):
+                    build_windows.promote_verified_directory(stage,existing,root)
+            self.assertEqual((existing/'SunriseImage.exe').read_bytes(),b'old-exe')
+            self.assertEqual((stage/'SunriseImage.exe').read_bytes(),b'new-exe')
+
+    def test_promotion_reverts_previous_exe_on_staged_rename_failure(self):
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t);existing=root/'dist/SunriseImage';existing.mkdir(parents=True)
+            (existing/'SunriseImage.exe').write_bytes(b'old-exe')
+            stage=root/'stage/SunriseImage';stage.mkdir(parents=True)
+            (stage/'SunriseImage.exe').write_bytes(b'new-exe')
+            original_rename=Path.rename
+            def fail_new_move(path,target):
+                if path == stage:
+                    raise OSError('simulated rename failure')
+                return original_rename(path,target)
+            with patch.object(build_windows.Path,'rename',autospec=True,side_effect=fail_new_move):
+                with self.assertRaisesRegex(OSError,'simulated rename failure'):
+                    build_windows.promote_verified_directory(stage,existing,root)
+            self.assertEqual((existing/'SunriseImage.exe').read_bytes(),b'old-exe')
+            self.assertEqual((stage/'SunriseImage.exe').read_bytes(),b'new-exe')
+
+    def test_pyinstaller_matplotlib_error_gets_actionable_hint(self):
+        hint=build_windows._failure_hint('02_pyinstaller.log',
+            "PermissionError: denied 'dist\\SunriseImage\\_internal\\matplotlib\\mpl-data\\images\\back.pdf'")
+        self.assertIn('Matplotlib',hint)
+        self.assertIn('임시 폴더',hint)
+
+    def test_legacy_qt_packages_warn_without_uninstall(self):
+        from importlib import metadata
+        def fake_version(name):
+            return {'PySide6-Essentials':'6.12.0','PySide6':'6.9.3','PySide6-Addons':'6.9.3'}[name]
+        with patch.object(build_windows.importlib.metadata,'version',side_effect=fake_version):
+            warnings=build_windows._pyside6_distribution_conflicts()
+        self.assertEqual(len(warnings),2)
+        self.assertTrue(all('6.9.3' in x for x in warnings))
 
     def test_non_windows_does_not_create_release(self):
         with tempfile.TemporaryDirectory() as temp:
