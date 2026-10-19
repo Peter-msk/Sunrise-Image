@@ -1,6 +1,7 @@
 """Windows-only direct EXE builder and packager (no virtual environment required)."""
 from __future__ import annotations
 import argparse, hashlib, importlib.metadata, importlib.util, json, os, platform, shutil, struct, subprocess, sys, time, traceback, zipfile
+from collections import deque
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -18,11 +19,47 @@ def check_source_audit():
     return audit
 
 
+def _log_tail(log_path: Path, lines: int = 65) -> str:
+    """Bounded read of the failing subprocess output, including malformed Windows bytes."""
+    with log_path.open('r', encoding='utf-8', errors='replace') as stream:
+        return ''.join(deque(stream, maxlen=lines)).rstrip()
+
+
+def _failure_hint(log_name: str, details: str) -> str:
+    """A possible fix, never a claim that the root cause was proven."""
+    if log_name != '02_pyinstaller.log':
+        return '실제 오류는 해당 단계 로그의 마지막 ERROR/Traceback을 확인하세요.'
+    lower = details.lower()
+    if 'multiple qt bindings' in lower or 'more than one qt' in lower:
+        return 'Qt 바인딩 중복 수집 오류입니다. PySide6만 패키징하도록 제외 옵션을 적용했습니다.'
+    if 'permissionerror' in lower or 'winerror 5' in lower or 'winerror 32' in lower:
+        return '파일 사용 중/접근 거부 가능성: 실행 중인 SunriseImage.exe 종료, 백신 격리와 폴더 권한 확인.'
+    if 'no module named pyinstaller' in lower:
+        return '현재 Python의 PyInstaller 설치 확인: python -m pip show pyinstaller.'
+    if 'module not found' in lower or 'modulenotfounderror' in lower or 'importerror' in lower:
+        return '모듈 누락 또는 호환성 문제 가능성: 로그의 모듈명과 requirements 버전을 확인.'
+    if 'file not found' in lower or 'not found' in lower:
+        return '경로 또는 수집 파일을 찾지 못했을 수 있습니다. 로그에 표시된 파일 경로를 확인.'
+    return '로그 마지막 부분의 원래 예외 메시지를 확인하세요. Windows_결과/WINDOWS_BUILD_RESULT.json에도 기록됩니다.'
+
+
 def command(args, log_name):
-    with (AUDIT / log_name).open('w', encoding='utf-8') as log:
+    log_path = AUDIT / log_name
+    # Do not hide the child process failure behind a generic return-code message.
+    with log_path.open('w', encoding='utf-8') as log:
         result = subprocess.run(args, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=False)
     if result.returncode:
-        raise RuntimeError(f'{log_name}: command failed ({result.returncode})')
+        tail = _log_tail(log_path)
+        hint = _failure_hint(log_name, tail)
+        print(f'\n[FAILED] {log_name} (exit {result.returncode})', file=sys.stderr, flush=True)
+        print(f'[원인 확인] {log_path}', file=sys.stderr, flush=True)
+        if tail:
+            print('----- 실제 하위 프로세스 오류 (마지막 65줄) -----', file=sys.stderr, flush=True)
+            print(tail, file=sys.stderr, flush=True)
+            print('----- 오류 출력 끝 -----', file=sys.stderr, flush=True)
+        print(f'[진단 안내] {hint}', file=sys.stderr, flush=True)
+        raise RuntimeError(f'{log_name}: command failed ({result.returncode}); '
+                           f'log={log_path}; hint={hint}')
 
 
 def _dependencies_ready() -> bool:
@@ -108,6 +145,11 @@ def main(package_only=False):
                 '--name', 'SunriseImage',
                 '--icon', 'assets/sunrise_image.ico',
                 '--add-data', 'assets:assets',
+                # Sunrise Image uses PySide6 only. Other Qt bindings installed in a
+                # shared Python environment must not trigger incompatible hooks.
+                '--exclude-module', 'PyQt5',
+                '--exclude-module', 'PyQt6',
+                '--exclude-module', 'PySide2',
                 '--collect-all', 'pymupdf',
                 '--copy-metadata', 'PyMuPDF',
                 '--copy-metadata', 'defusedxml',
@@ -166,6 +208,14 @@ def main(package_only=False):
     except Exception:
         summary['failed_stage'] = stage
         summary['error'] = traceback.format_exc()
+        log_names = {'dependencies': '01_dependencies.log', 'build': '02_pyinstaller.log',
+                     'windows_runtime': '03_runtime.log'}
+        if stage in log_names:
+            log_path = AUDIT / log_names[stage]
+            if log_path.is_file():
+                summary['failed_log'] = str(log_path)
+                summary['failed_log_tail'] = _log_tail(log_path)
+                summary['diagnostic_hint'] = _failure_hint(log_names[stage], summary['failed_log_tail'])
         print(summary['error'])
     finally:
         (AUDIT / 'WINDOWS_BUILD_RESULT.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')

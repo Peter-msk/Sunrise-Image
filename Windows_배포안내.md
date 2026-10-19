@@ -30,6 +30,19 @@
 
 `SOURCE_AUDIT.json`에 기록한 소스 해시가 일치하면 기존 기능 검증 PASS를 재사용하고 전체 단위·통합 테스트를 반복하지 않습니다. 빌드에서는 필요한 라이브러리 설치, EXE 생성, **Windows에서만 확인할 수 있는 동결 런타임 실행**을 수행합니다. 해당 실행이 PASS여야 휴대용 배포 ZIP을 생성합니다.
 
+## PyInstaller 단계에서 실패한 경우 (오류 표시 강화)
+
+`EXE_빌드.bat`는 **64비트 Python 3.12**가 설치되어 있으면 이를 우선 사용합니다. 별도 가상환경을 생성하지 않으며, 현재 선택된 Python에 정확한 버전의 요구 라이브러리가 이미 설치돼 있으면 재설치를 건너뜁니다.
+
+빌드 중 PyInstaller가 실패할 경우 `02_pyinstaller.log: command failed (1)`만 표시하지 않고 **실제 PyInstaller 출력 마지막 65줄**을 같은 실행창에 보여줍니다. 또한 `Windows_결과/WINDOWS_BUILD_RESULT.json`의 `failed_stage`, `failed_log`, `failed_log_tail`, `diagnostic_hint`를 확인할 수 있습니다.
+
+- **Qt 바인딩 중복:** 이 프로그램은 PySide6를 사용합니다. 시스템 Python에 PyQt5/PyQt6/PySide2가 함께 설치된 경우에도 다른 Qt 바인딩이 패키징되지 않도록 제외 설정을 적용합니다.
+- **WinError 5 또는 WinError 32:** 기존 `dist/SunriseImage/SunriseImage.exe`가 실행 중인지, 다른 프로세스가 대상 파일을 점유하는지, 해당 폴더에 쓰기 권한이 있는지 확인하세요.
+- **ModuleNotFoundError·ImportError:** 오류에 표시된 **정확한 모듈 이름**을 확인합니다. 경고 메시지만으로 요구 패키지 버전을 무조건 업그레이드하지 않습니다.
+- **기타 오류:** 실행창에 출력되는 원래 PyInstaller 예외를 기준으로 조치합니다. 단순히 종료 코드 1만으로 원인을 단정하지 않습니다.
+
+현재 수정에는 PyInstaller 작업 캐시를 매번 지우는 `--clean`이나 전체 기능 테스트의 중복 재실행을 추가하지 않았습니다. Windows 빌드 및 동결 실행 테스트는 해당 Windows PC에서만 확인할 수 있습니다.
+
 ## 결과 파일
 
 | 파일 | 의미 |

@@ -2,6 +2,15 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
+rem Prefer the project's documented Python 3.12 when available. No venv created.
+where py >nul 2>nul
+if not errorlevel 1 (
+    py -3.12 -c "import sys; assert sys.maxsize > 2**32" >nul 2>nul
+    if not errorlevel 1 (
+        py -3.12 -u build_windows.py
+        goto check_result
+    )
+)
 where python >nul 2>nul
 if not errorlevel 1 (
     python -u build_windows.py
@@ -27,6 +36,9 @@ exit /b 0
 
 :failed
 echo.
-echo [실패] 빌드 또는 실행 확인 실패. Windows_결과 폴더의 로그를 확인하세요.
+echo [실패] 빌드 또는 실행 확인 실패.
+echo - 실제 PyInstaller 오류가 위에 표시됩니다.
+echo - 상세 로그: Windows_결과\02_pyinstaller.log
+echo - 결과 요약: Windows_결과\WINDOWS_BUILD_RESULT.json
 pause
 exit /b 1

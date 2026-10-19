@@ -1,4 +1,4 @@
-import hashlib,json,tempfile,unittest,zipfile
+import hashlib,json,tempfile,unittest,zipfile,subprocess
 from email.errors import HeaderParseError
 from pathlib import Path
 from unittest.mock import patch
@@ -88,6 +88,35 @@ class BuildTests(unittest.TestCase):
             self.assertNotIn('01_dependencies.log',logs)
             self.assertIn('02_pyinstaller.log',logs)
             self.assertIn('03_runtime.log',logs)
+            build_args=next(args for args,log in calls if log=='02_pyinstaller.log')
+            self.assertIn('--collect-all',build_args)
+            self.assertIn('pymupdf',build_args)
+            for qt in ('PyQt5','PyQt6','PySide2'):
+                self.assertIn(qt,build_args)
+            self.assertNotIn('--clean',build_args)  # No duplicate clean rebuild by default.
+
+    def test_subprocess_error_is_visible_and_retained_in_log(self):
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t);audit=root/'Windows_결과';audit.mkdir()
+            def failed(*args, **kwargs):
+                kwargs['stdout'].write('INFO: analyzing hooks\nERROR: Aborting build process due to multiple Qt bindings\n')
+                return subprocess.CompletedProcess(args[0], 1)
+            with patch.object(build_windows,'ROOT',root),patch.object(build_windows,'AUDIT',audit),patch.object(build_windows.subprocess,'run',side_effect=failed),patch('builtins.print') as printer:
+                with self.assertRaisesRegex(RuntimeError, '02_pyinstaller.log: command failed'):
+                    build_windows.command(['dummy-pyinstaller'], '02_pyinstaller.log')
+            log_text=(audit/'02_pyinstaller.log').read_text(encoding='utf-8')
+            self.assertIn('multiple Qt bindings',log_text)
+            output='\n'.join(str(c) for c in printer.call_args_list)
+            self.assertIn('multiple Qt bindings',output)
+            self.assertIn('PySide6',output)
+
+    def test_pyinstaller_hint_and_malformed_log_bytes(self):
+        with tempfile.TemporaryDirectory() as t:
+            log=Path(t)/'02_pyinstaller.log';log.write_bytes(b'first\n' + b'bad\xffbytes\n' + b'last error\n')
+            self.assertIn('last error',build_windows._log_tail(log))
+            self.assertIn('\ufffd',build_windows._log_tail(log))
+        self.assertIn('파일 사용 중',build_windows._failure_hint('02_pyinstaller.log','PermissionError: [WinError 32]'))
+        self.assertIn('모듈 누락',build_windows._failure_hint('02_pyinstaller.log',"ModuleNotFoundError: No module named 'foo'"))
 
     def test_non_windows_does_not_create_release(self):
         with tempfile.TemporaryDirectory() as temp:
