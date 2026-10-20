@@ -253,10 +253,9 @@ def main(package_only=False):
         stage = 'licenses'
         collect_licenses(built_dist / 'licenses')
         summary['stages']['licenses'] = 'PASS'
-        stage = 'documentation'
-        for name in ['사용방법.md', 'Windows_배포안내.md', '성능개선.md']:
-            shutil.copyfile(ROOT / name, built_dist / name)
-        summary['stages']['documentation'] = 'PASS'
+        # Only executable components and mandatory third-party notices are
+        # included in the release. User manuals are kept in Drive, not GitHub.
+        summary['stages']['documentation'] = 'SKIPPED (no optional manuals packaged)'
         stage = 'archive'
         release = ROOT / 'release'
         release.mkdir(exist_ok=True)
