@@ -1,6 +1,8 @@
 """Sunrise Image — Main window controller (KISS, SRP, Layout-Grouped Modularity, and Single Source of Truth)."""
 from __future__ import annotations
 import html
+import logging
+import os
 import io
 import sys
 import threading
@@ -18,9 +20,10 @@ from PySide6.QtWidgets import (
 from document_optimizer import optimize_document
 from document_reader import HANCOM_NOTICE, OPTIMIZABLE, SUPPORTED, open_document, scan_document
 from image_engine import Cancelled, DPI_FORMATS, Settings, checkpoint, convert_item, extract_images, human_location, open_raster
+from product_info import APP_NAME
 from progress_state import BatchProgress
 from ui_layout_groups import (
-    attach_progress_footer_group,
+    attach_progress_footer_group, apply_layout_styles,
     build_capacity_settings_group,
     build_collection_shared_group,
     build_document_list_group,
@@ -72,7 +75,7 @@ class Window(QWidget):
     def __init__(self):
         super().__init__()
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.setWindowTitle('Sunrise Image')
+        self.setWindowTitle(APP_NAME)
         self.setMinimumSize(1180, 720)
         self.files: list[Path] = []
         self.catalogs = {}
@@ -83,6 +86,10 @@ class Window(QWidget):
         self.scan_generation = 0
         self.scan_cancel = threading.Event()
         self.jobs = {}
+        self.progress_timer = QTimer(self)
+        self.progress_timer.setInterval(33)
+        self.progress_timer.timeout.connect(self._flush_job_progress)
+        self.progress_timer.start()
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(2)
         self.cancel = threading.Event()
@@ -103,6 +110,8 @@ class Window(QWidget):
         # Apply stylesheet before constructing child widgets so initial sizeHints match QSS metrics
         self._apply_qss_only()
         self.build()
+        self.badge.setToolTip(APP_NAME)
+        self.log.document().setMaximumBlockCount(2000)
         self.preview_dialog = PreviewDialog(self)
         self.apply_theme()
         self.resize(1200, 760)
@@ -248,6 +257,7 @@ class Window(QWidget):
         if self.preview_dialog is not None:
             self.preview_dialog.setStyleSheet(qss)
             relayout_widget_tree(self.preview_dialog)
+        apply_layout_styles(self, self.dark_mode)
         if hasattr(self, 'doc_table'):
             self.update_document_rows()
         relayout_widget_tree(self)
@@ -417,9 +427,13 @@ class Window(QWidget):
     def launch(self, function, kind):
         task = Task(function, kind)
         self.jobs[task.id] = task
-        task.signals.event.connect(self.on_event)
+        task.signals.event.connect(self.on_event, Qt.ConnectionType.QueuedConnection)
         self.pool.start(task)
         return task.id
+
+    def _flush_job_progress(self):
+        for task in list(self.jobs.values()):
+            task.flush_progress()
 
     def mode_key(self, path):
         return (str(path), self.crop.isChecked())
@@ -492,15 +506,20 @@ class Window(QWidget):
             tip=f"'{path_obj.name}' 문서의 이미지 목록(LIST) 및 미리보기 팝업창을 엽니다.",
         )
 
-    def _expand_input_paths(self, raw_paths) -> tuple[list[Path], bool]:
+    def _expand_input_paths(self, raw_paths, cancel=None) -> tuple[list[Path], bool]:
         expanded: list[Path] = []
         rejected_hwp = False
+        def walk(folder):
+            for directory, subdirs, names in os.walk(folder, followlinks=False):
+                checkpoint(cancel)
+                subdirs.sort()
+                for name in sorted(names):
+                    yield Path(directory) / name
         for raw in raw_paths:
             p = Path(raw).resolve()
-            targets = sorted(p.rglob('*')) if p.is_dir() else [p]
+            targets = walk(p) if p.is_dir() else [p]
             for item in targets:
-                if self.closing:
-                    break
+                checkpoint(cancel)
                 if not item.is_file():
                     continue
                 ext = item.suffix.lower()
@@ -508,7 +527,7 @@ class Window(QWidget):
                     rejected_hwp = True
                 elif ext in SUPPORTED and (not p.is_dir() or not item.stem.endswith('_경량화')):
                     expanded.append(item.resolve())
-        return expanded, rejected_hwp
+        return list(dict.fromkeys(expanded)), rejected_hwp
 
     def add_files(self, paths):
         if self.busy:
@@ -516,8 +535,9 @@ class Window(QWidget):
         if any(Path(raw).is_dir() for raw in paths):
             self.set_busy(True)
             self.status.setText('폴더에서 문서를 찾고 있습니다…')
-            captured = list(paths)
-            self.launch(lambda emit: self._expand_input_paths(captured), 'inputs')
+            self.cancel.clear()
+            captured, cancel = list(paths), self.cancel
+            self.launch(lambda emit: self._expand_input_paths(captured, cancel), 'inputs')
             return
         candidates, rejected_hwp = self._expand_input_paths(paths)
         self._add_candidates(candidates, rejected_hwp)
@@ -559,12 +579,22 @@ class Window(QWidget):
         for row in rows:
             self.file_list.takeItem(row)
             self.doc_table.takeTopLevelItem(row)
-            self.optimized_results.pop(str(self.files.pop(row)), None)
+            removed = self.files.pop(row)
+            self.optimized_results.pop(str(removed), None)
+            for store in (self.catalogs, self.catalog_errors, self.checked_keys):
+                for key in list(store):
+                    if key[0] == str(removed):
+                        store.pop(key, None)
         self.doc_table.blockSignals(False)
         self.file_list.blockSignals(False)
         if self.files and self.file_list.currentRow() < 0:
             self.file_list.setCurrentRow(min(rows[-1], len(self.files) - 1))
+        self.scan_generation += 1
+        self.scan_cancel.set()
+        self.scan_cancel = threading.Event()
+        self.pending_scans.clear()
         self.scan(self.file_list.currentRow())
+        self.queue_scan()
         self.refresh_selection_status()
 
     def clear_files(self):
@@ -653,6 +683,7 @@ class Window(QWidget):
         self.launch(work, 'scan_done')
 
     def scan(self, row):
+        self.preview_cancel.set()
         self.preview_job = None
         self.preview_pixmap = None
         self.tree.blockSignals(True)
@@ -1012,6 +1043,8 @@ class Window(QWidget):
         self.update_document_rows()
 
     def request_preview(self, *_):
+        self.preview_cancel.set()
+        self.preview_job = None
         if self.preview_dialog is not None:
             self.preview_dialog.sync_from_main()
         active = self.collection_tabs.currentIndex() == 1 or (self.preview_dialog is not None and self.preview_dialog.isVisible())
@@ -1021,6 +1054,10 @@ class Window(QWidget):
     def preview(self):
         row, path = self.tree.currentItem(), self.current_path()
         if self.busy or self.closing or row is None or path is None:
+            return
+        if any(task.kind == 'preview' for task in self.jobs.values()):
+            self.preview_cancel.set()
+            self.timer.start()
             return
         self.timer.stop()
         self.preview_cancel.set()
@@ -1173,8 +1210,11 @@ class Window(QWidget):
         self.launch(work, 'done')
 
     def optimize_selected_in_current_document(self):
-        """Convert ONLY the selected/checked images (e.g., PNG·BMP) inside the currently previewed document."""
+        """Convert ONLY the selected/checked images inside the previewed document."""
         if self.busy:
+            return
+        if self.pending_scans:
+            self.status.setText('이미지 목록이 완성된 뒤 변환하세요.')
             return
         path = self.current_path()
         if path is None:
@@ -1273,6 +1313,7 @@ class Window(QWidget):
                 except Cancelled:
                     break
                 except Exception as exc:
+                    logging.getLogger('sunrise_image.workflow').exception('Document workflow failed')
                     broken += 1
                     emit({'type': 'document_end', 'document': index, 'error': f'{path.name}: {exc}'})
             return {'results': results, 'broken': broken, 'cancelled': self.cancel.is_set()}
@@ -1281,6 +1322,9 @@ class Window(QWidget):
 
     def start_optimize_work(self):
         if self.busy:
+            return
+        if self.pending_scans:
+            self.status.setText('이미지 목록이 완성된 뒤 변환하세요.')
             return
         if not self.files or not self.destination.text().strip():
             QMessageBox.information(self, '파일과 폴더 선택', '문서와 저장 폴더를 선택하세요.')
@@ -1300,7 +1344,9 @@ class Window(QWidget):
             key = self.mode_key(path)
             cat = self.catalogs.get(key)
             if cat is None and key not in self.catalog_errors:
-                snapshots.append((path, None, None, None))
+                self.queue_scan()
+                self.status.setText('이미지 목록이 완성된 뒤 변환하세요.')
+                return
             else:
                 keys = set(self.checked_keys.get(key, set()))
                 if keys or key in self.catalog_errors:
@@ -1328,6 +1374,7 @@ class Window(QWidget):
                 except Cancelled:
                     break
                 except Exception as exc:
+                    logging.getLogger('sunrise_image.workflow').exception('Document workflow failed')
                     broken += 1
                     emit({'type': 'document_end', 'document': index, 'source': str(path), 'error': f'{path.name}: {exc}'})
             return {'mode': 'optimize', 'results': results, 'broken': broken, 'cancelled': self.cancel.is_set()}
@@ -1353,7 +1400,10 @@ class Window(QWidget):
             if self.closing:
                 return
             if 'error' in packet:
-                QMessageBox.warning(self, '폴더 읽기 실패', packet['error'])
+                if not self.cancel.is_set():
+                    QMessageBox.warning(self, '폴더 읽기 실패', packet['error'])
+                else:
+                    self.status.setText('폴더 검색을 중지했습니다.')
             else:
                 self._add_candidates(*packet['value'])
             return
@@ -1391,7 +1441,7 @@ class Window(QWidget):
             val = packet['value']
             typ = val['type']
             if typ == 'catalog':
-                if val['generation'] != self.scan_generation:
+                if val['generation'] != self.scan_generation or Path(val['source']) not in self.files:
                     return
                 key = (val['source'], val['mode'])
                 self.pending_scans.discard(key)
@@ -1403,7 +1453,10 @@ class Window(QWidget):
                         val['catalog'],
                         self.active_image_filter if self.active_image_filter != 'custom' else 'all',
                     )
-                    self.checked_keys.setdefault(key, default_keys)
+                    if key in self.checked_keys:
+                        self.checked_keys[key].intersection_update(i.key for i in val['catalog'].items)
+                    else:
+                        self.checked_keys[key] = default_keys
                 if self.current_path() and key == self.mode_key(self.current_path()):
                     self.scan(self.file_list.currentRow())
                 self.refresh_selection_status()
@@ -1426,7 +1479,7 @@ class Window(QWidget):
             elif typ == 'item':
                 row = val['row']
                 self.log.append(html.escape(f"[{row['상태']}] {row['저장 파일'] or row['내부 파일']} · {row.get('비고', '')}"))
-                self.batch_progress.item_done(val['document'], val['index'], row['상태'])
+                self.batch_progress.item_done(val['document'], val['index'], row['상태'], val.get('_counts'))
                 self.render_batch_progress()
             elif typ == 'document_end':
                 res = val.get('result')
@@ -1464,7 +1517,8 @@ class Window(QWidget):
             self.batch_progress.finish(val['cancelled'])
             self.render_batch_progress()
             saved, failed, warned = self.batch_progress.saved, self.batch_progress.failed, self.batch_progress.warned
-            state = '중지됨' if val['cancelled'] else '완료'
+            state = ('중지됨' if val['cancelled'] else
+                     ('일부 완료' if saved else '실패') if failed or val['broken'] else '완료')
             if val.get('mode') == 'optimize':
                 src_b = sum(r.get('source_doc_bytes', 0) for r in results)
                 out_b = sum(r.get('output_doc_bytes', 0) for r in results)
@@ -1561,6 +1615,14 @@ class Window(QWidget):
 
 
 def main():
+    if '--startup-smoke' in sys.argv:
+        import argparse
+        from runtime_check import run_startup
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--startup-smoke', action='store_true')
+        parser.add_argument('--report', required=True)
+        args = parser.parse_args()
+        sys.exit(run_startup(args.report))
     if '--smoke-test' in sys.argv:
         import argparse
         from runtime_check import run

@@ -6,13 +6,15 @@ import io
 import math
 import posixpath
 import re
+import stat
+import threading
 import zipfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 from defusedxml import ElementTree as ET
 from PIL import Image
-from image_engine import MAX_MEMBER_BYTES, VECTOR_EXTS, checkpoint, read_member
+from image_engine import MAX_MEMBER_BYTES, VECTOR_EXTS, checkpoint, read_member, validate_archive_member
 
 SUPPORTED = {
     '.hwpx': '한글 HWPX',
@@ -31,6 +33,9 @@ OPTIMIZABLE = {
 RASTER_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tif', '.tiff', '.webp', '.ico', '.pcx', '.tga', '.jp2', '.j2k', '.avif'}
 IMAGE_EXTS = RASTER_EXTS | VECTOR_EXTS
 MAX_XML_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_BYTES = 8 * 1024 * 1024 * 1024
+MAX_ARCHIVE_ENTRIES = 100_000
+_PDF_LOCK = threading.Lock()
 HANCOM_NOTICE = '지원 문서: 개방형 한글(.hwpx), PDF(.pdf), Excel(.xlsx), Word(.docx), PowerPoint(.pptx) · 구형 한글(.hwp)은 지원 대상에서 제외됩니다.'
 
 
@@ -45,7 +50,35 @@ def local(tag):
 def safe_xml(archive, name):
     if archive.getinfo(name).file_size > MAX_XML_BYTES:
         raise ValueError('XML 정보가 제한 크기를 초과했습니다.')
-    return ET.fromstring(archive.read(name))
+    return ET.fromstring(read_xml_bytes(archive, name))
+
+
+def read_xml_bytes(archive, name):
+    if archive.getinfo(name).file_size > MAX_XML_BYTES:
+        raise ValueError('XML 정보가 제한 크기를 초과했습니다.')
+    with archive.open(name) as handle:
+        raw = handle.read(MAX_XML_BYTES + 1)
+    if len(raw) > MAX_XML_BYTES:
+        raise ValueError('XML 정보가 제한 크기를 초과했습니다.')
+    return raw
+
+
+def validate_document_archive(archive):
+    infos = archive.infolist()
+    if len(infos) > MAX_ARCHIVE_ENTRIES:
+        raise ValueError('문서 내부 항목 수가 안전 제한을 초과했습니다.')
+    total = 0
+    seen = set()
+    for info in infos:
+        name = validate_archive_member(info.filename).casefold()
+        if name in seen:
+            raise ValueError('중복된 문서 내부 경로가 있습니다.')
+        seen.add(name)
+        if stat.S_ISLNK(info.external_attr >> 16) or info.flag_bits & 1:
+            raise ValueError('링크 또는 암호화된 문서 내부 항목은 지원하지 않습니다.')
+        total += info.file_size
+        if total > MAX_ARCHIVE_BYTES:
+            raise ValueError('문서 압축 해제 크기가 안전 제한을 초과했습니다.')
 
 
 @dataclass(frozen=True)
@@ -118,6 +151,11 @@ class ZipReader:
             raise ValueError('구형 바이너리 문서(HWP/DOC/XLS)이거나 문서보안(DRM)·암호가 설정된 파일입니다. 개방형 문서(.hwpx, .xlsx, .docx, .pptx)로 저장한 뒤 사용하세요.')
         try:
             self.z = zipfile.ZipFile(path)
+            try:
+                validate_document_archive(self.z)
+            except Exception:
+                self.z.close()
+                raise
         except (zipfile.BadZipFile, OSError) as exc:
             raise ValueError(f'손상되었거나 올바르지 않은 문서 파일입니다: {self.path.name}') from exc
 
@@ -168,7 +206,10 @@ class ZipReader:
             ],
             key=natural,
         )
-        assets = {name: self.inspect(name) for name in names}
+        assets = {}
+        for name in names:
+            checkpoint(self.cancel)
+            assets[name] = self.inspect(name)
         if ext != '.hwpx' or not self.body:
             return Catalog(str(self.path), list(assets.values()))
         mapping = {}
@@ -255,16 +296,27 @@ class PdfReader:
         self.fitz = pymupdf
         self.path = Path(path)
         self.cancel = cancel
+        while not _PDF_LOCK.acquire(timeout=0.1):
+            checkpoint(cancel)
         try:
+            checkpoint(cancel)
             self.doc = pymupdf.open(path)
         except Exception as exc:
-            raise ValueError(f'손상되었거나 읽을 수 없는 PDF 문서입니다: {exc}') from exc
+            _PDF_LOCK.release()
+            from image_engine import Cancelled
+            if isinstance(exc, Cancelled):
+                raise
+            raise ValueError('손상되었거나 읽을 수 없는 PDF 문서입니다.') from exc
         if self.doc.needs_pass:
             self.doc.close()
+            _PDF_LOCK.release()
             raise ValueError('암호가 설정된 PDF는 지원하지 않습니다.')
 
     def close(self):
-        self.doc.close()
+        try:
+            self.doc.close()
+        finally:
+            _PDF_LOCK.release()
 
     def __enter__(self):
         return self
@@ -273,6 +325,8 @@ class PdfReader:
         self.close()
 
     def read(self, item):
+        if item.size and item.size[0] * item.size[1] > 80_000_000:
+            raise ValueError('PDF 이미지가 8천만 픽셀을 초과합니다.')
         if item.meta.get('inline'):
             page = self.doc[item.meta['page']]
             blocks = page.get_text('dict', flags=self.fitz.TEXT_PRESERVE_IMAGES)['blocks']
@@ -364,8 +418,11 @@ def open_document(path, body=False, cancel=None):
 
 
 def scan_document(path, body=False, cancel=None):
+    before = Path(path).stat()
     with open_document(path, body, cancel) as reader:
         catalog = reader.catalog()
         st = Path(path).stat()
+        if (before.st_size, before.st_mtime_ns) != (st.st_size, st.st_mtime_ns):
+            raise ValueError('분석 중 문서가 변경되었습니다. 목록을 새로고침하세요.')
         catalog.fingerprint = (st.st_size, st.st_mtime_ns)
         return catalog

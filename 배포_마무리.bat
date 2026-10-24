@@ -5,12 +5,12 @@ cd /d "%~dp0"
 if not exist "dist\SunriseImage\SunriseImage.exe" goto noexe
 where python >nul 2>nul
 if not errorlevel 1 (
-    python -u build_windows.py --package-only
+    python -u build_windows.py --package-only --profile RELEASE_MIN
     goto check_result
 )
 where py >nul 2>nul
 if not errorlevel 1 (
-    py -3 -u build_windows.py --package-only
+    py -3 -u build_windows.py --package-only --profile RELEASE_MIN
     goto check_result
 )
 echo [오류] 시스템에서 Python을 찾을 수 없습니다.
@@ -19,7 +19,7 @@ exit /b 1
 
 :check_result
 if errorlevel 1 goto failed
-echo 배포 마무리 완료. release\Sunrise_Image_WINDOWS_x64.zip을 확인하세요.
+echo 그룹서명 적용 패키지 완료. release\Sunrise_Image.zip을 확인하세요.
 pause
 exit /b 0
 

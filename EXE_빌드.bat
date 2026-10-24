@@ -7,18 +7,18 @@ where py >nul 2>nul
 if not errorlevel 1 (
     py -3.12 -c "import sys; assert sys.maxsize > 2**32" >nul 2>nul
     if not errorlevel 1 (
-        py -3.12 -u build_windows.py
+        py -3.12 -u build_windows.py --profile RELEASE_MIN
         goto check_result
     )
 )
 where python >nul 2>nul
 if not errorlevel 1 (
-    python -u build_windows.py
+    python -u build_windows.py --profile RELEASE_MIN
     goto check_result
 )
 where py >nul 2>nul
 if not errorlevel 1 (
-    py -3 -u build_windows.py
+    py -3 -u build_windows.py --profile RELEASE_MIN
     goto check_result
 )
 echo [오류] 시스템에서 Python을 찾을 수 없습니다. 64비트 Python(PATH 추가)을 설치하세요.
@@ -28,9 +28,9 @@ exit /b 1
 :check_result
 if errorlevel 1 goto failed
 echo.
-echo [완료] 가상환경 없이 Windows EXE 직접 빌드가 완료되었습니다!
+echo [완료] Sunrise Group 서명 적용 빌드가 완료되었습니다!
 echo - 실행 파일: dist\SunriseImage\SunriseImage.exe
-echo - 배포 압축본: release\Sunrise_Image_WINDOWS_x64.zip
+echo - 배포 압축본: release\Sunrise_Image.zip
 pause
 exit /b 0
 

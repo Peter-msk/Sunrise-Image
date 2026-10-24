@@ -44,7 +44,8 @@ def human_location(location: str) -> str:
 def validate_archive_member(name: str) -> str:
     norm = (name or '').replace('\\', '/')
     parts = PurePosixPath(norm).parts
-    if not norm or norm.startswith('/') or '..' in parts or any(':' in p for p in parts):
+    if (not norm or norm.startswith('/') or '..' in parts
+            or any(':' in p for p in parts) or any(ord(c) < 32 for c in norm)):
         raise ValueError(f'안전하지 않은 문서 내부 경로입니다: {name}')
     return norm
 
@@ -128,7 +129,7 @@ def open_raster(data: bytes):
             warnings.simplefilter('error', Image.DecompressionBombWarning)
             im = Image.open(io.BytesIO(data))
     try:
-        if Image.MAX_IMAGE_PIXELS and im.width*im.height > Image.MAX_IMAGE_PIXELS:
+        if im.width * im.height > MAX_OUTPUT_PIXELS:
             raise Image.DecompressionBombWarning('이미지 픽셀 수가 안전 제한을 초과합니다.')
         im.load()
     except Exception:
@@ -461,6 +462,11 @@ def _conversion_results(reader, items, settings, cancel, workers, notify_start=l
             for _,future,_,_ in pending:future.cancel()
 
 
+def csv_record(record):
+    return {key: "'" + value if isinstance(value, str) and value.lstrip().startswith(('=', '+', '-', '@')) else value
+            for key, value in record.items()}
+
+
 def extract_images(source: Path, destination: Path, settings: Settings | None = None,
                    notify: Callable = lambda event: None, cancel=None, selected_keys=None, catalog=None,
                    *, workers=None):
@@ -471,6 +477,8 @@ def extract_images(source: Path, destination: Path, settings: Settings | None = 
         raise ValueError('동시 변환 수는 1~4 범위로 지정하세요.')
     saved=failed=warned=processed=0;stopped=False;records=[]
     with open_document(source,s.apply_document_crop,cancel) as reader:
+        if catalog and Path(catalog.source).resolve() != Path(source).resolve():
+            raise ValueError('선택 목록의 원본문서가 일치하지 않습니다. 목록을 새로고침하세요.')
         current=catalog or reader.catalog()
         if catalog and getattr(catalog,'fingerprint',None):
             stat=Path(source).stat()
@@ -508,7 +516,11 @@ def extract_images(source: Path, destination: Path, settings: Settings | None = 
                     else:
                         name=f'{index:04d}_{stem_part}{result.extension}'
                     target=folder/name
-                    try:target.write_bytes(result.data)
+                    try:
+                        with target.open('xb') as handle:
+                            handle.write(result.data)
+                    except FileExistsError:
+                        raise
                     except Exception:
                         target.unlink(missing_ok=True);raise
                     caution=any(any(term in n for term in ['미달성','미반영','미제공','원본 밖']) for n in result.notes)
@@ -533,6 +545,6 @@ def extract_images(source: Path, destination: Path, settings: Settings | None = 
             fields=['내부 파일','목록 ID','본문 위치','저장 파일','상태','원본 바이트','출력 바이트','원본 가로','원본 세로',
                     '출력 가로','출력 세로','DPI 가로','DPI 세로','실제 품질','목표 KB','목표 달성','자르기 픽셀','비고']
             with (folder/'추출결과.csv').open('w',encoding='utf-8-sig',newline='') as handle:
-                writer=csv.DictWriter(handle,fieldnames=fields);writer.writeheader();writer.writerows(records)
+                writer=csv.DictWriter(handle,fieldnames=fields);writer.writeheader();writer.writerows(csv_record(row) for row in records)
     return {'folder':str(folder),'saved':saved,'failed':failed,'warned':warned,'processed':processed,'total':len(items),'cancelled':stopped,
             'elapsed_seconds':time.perf_counter()-started}

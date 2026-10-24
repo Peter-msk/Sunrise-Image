@@ -4,6 +4,8 @@ from pathlib import Path
 
 def main():
     try:
+        from diagnostics import configure_logging
+        configure_logging()
         from hwpx_image_extractor import main as start
         start()
     except Exception:

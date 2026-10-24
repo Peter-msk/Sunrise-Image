@@ -4,6 +4,42 @@ import io,json,os,platform,sys,tempfile,time,traceback,zipfile
 from pathlib import Path
 
 
+def run_startup(report_path):
+    from product_info import APP_NAME, APP_ID, PACKAGE_KIND
+    from hwpx_image_extractor import QApplication, Window
+    import PIL, PySide6, pymupdf, defusedxml
+    from PySide6.QtCore import QEvent
+    path = Path(report_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    report = {'program': APP_NAME, 'app_id': APP_ID,
+              'package_kind': PACKAGE_KIND, 'windows_verified': platform.system() == 'Windows',
+              'frozen': bool(getattr(sys, 'frozen', False)), 'status': 'FAILED', 'checks': {}}
+    window = None
+    app = QApplication.instance() or QApplication(['SunriseImage', '--startup-smoke'])
+    app.setStyle('Fusion')
+    try:
+        window = Window()
+        window.show()
+        app.processEvents()
+        if not window.isVisible() or window.windowIcon().isNull():
+            raise RuntimeError('Startup window/icon failed')
+        root = Path(__file__).resolve().parent
+        for name in ('check.svg', 'chevron_down.svg', 'chevron_up.svg', 'sunrise_image.ico'):
+            if not (root / 'assets' / name).is_file():
+                raise RuntimeError('Required asset missing: ' + name)
+        report['checks']['imports_assets_startup'] = 'PASS'
+        report['status'] = 'PASS'
+    except Exception:
+        report['error'] = traceback.format_exc()
+    finally:
+        if window is not None:
+            window.close()
+            app.processEvents()
+            app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    return 0 if report['status'] == 'PASS' else 1
+
+
 def run(report_path=None):
     from PIL import Image,ImageDraw
     import PIL,PySide6,pymupdf,defusedxml

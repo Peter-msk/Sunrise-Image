@@ -1,18 +1,25 @@
-"""Windows-only direct EXE builder and packager (no virtual environment required)."""
+"""Windows build profiles: BUILD_MIN for development, RELEASE_MIN for signed delivery."""
 from __future__ import annotations
 import argparse, hashlib, importlib.metadata, importlib.util, json, os, platform, shutil, struct, subprocess, sys, time, traceback, uuid, zipfile
 from collections import deque
 from pathlib import Path
+from product_info import APP_ID, APP_NAME, ENTRY_EXECUTABLE, PACKAGE_KIND
 
 ROOT = Path(__file__).resolve().parent
 AUDIT = ROOT / 'Windows_결과'
 DIST = ROOT / 'dist' / 'SunriseImage'
+DEFAULT_PROFILE = 'RELEASE_MIN'
 
 
 def check_source_audit():
     audit = json.loads((ROOT / 'SOURCE_AUDIT.json').read_text(encoding='utf-8'))
     if audit.get('status') != 'PASS':
         raise RuntimeError('Source audit is not PASS')
+    if audit.get('schema_version') == 2:
+        required = {f.relative_to(ROOT).as_posix() for pattern in ('*.py', '*.ps1', '*.bat', 'requirements*.txt') for f in ROOT.glob(pattern) if f.name != 'render_final_execution_screens.py'}
+        required.update(f.relative_to(ROOT).as_posix() for f in (ROOT / 'assets').rglob('*') if f.is_file())
+        if required - audit['sha256'].keys():
+            raise RuntimeError('Source audit does not cover all build inputs')
     for name, digest in audit['sha256'].items():
         if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest:
             raise RuntimeError('Source changed after audit: ' + name)
@@ -50,7 +57,8 @@ def command(args, log_name):
     log_path = AUDIT / log_name
     # Do not hide the child process failure behind a generic return-code message.
     with log_path.open('w', encoding='utf-8') as log:
-        result = subprocess.run(args, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=False)
+        result = subprocess.run(args, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=False,
+                                timeout=1800 if log_name == '02_pyinstaller.log' else 600 if log_name == '01_dependencies.log' else 90)
     if result.returncode:
         tail = _log_tail(log_path)
         hint = _failure_hint(log_name, tail)
@@ -66,7 +74,7 @@ def command(args, log_name):
 
 
 def _dependencies_ready() -> bool:
-    requirements = (ROOT / 'requirements.txt').read_text().splitlines() + (ROOT / 'requirements-build.txt').read_text().splitlines()
+    requirements = (ROOT / 'requirements.txt').read_text(encoding='utf-8').splitlines() + (ROOT / 'requirements-build.txt').read_text(encoding='utf-8').splitlines()
     for entry in requirements:
         entry = entry.strip()
         if not entry or entry.startswith('#'):
@@ -133,15 +141,17 @@ def promote_verified_directory(staged: Path, destination: Path, audit_dir: Path)
             backup.rename(destination)
         raise
     if backup is not None:
-        try:
-            shutil.rmtree(backup)
-        except OSError as exc:
-            print(f'[WARN] 이전 배포본 백업 삭제 실패 (수동 확인 필요): {backup} ({exc})', flush=True)
+        print(f'[INFO] 이전 빌드 보존: {backup}', flush=True)
 
 
 def _pyside6_distribution_conflicts():
     """Warn about orphaned old metapackages without uninstalling other apps' dependencies."""
-    expected = importlib.metadata.version('PySide6-Essentials')
+    requirement_file = ROOT / 'requirements.txt'
+    if requirement_file.is_file():
+        expected = next(line.split('==', 1)[1].strip() for line in requirement_file.read_text(encoding='utf-8').splitlines()
+                        if line.startswith('PySide6-Essentials=='))
+    else:
+        expected = importlib.metadata.version('PySide6-Essentials')
     conflicts = []
     for name in ('PySide6', 'PySide6-Addons'):
         try:
@@ -153,10 +163,29 @@ def _pyside6_distribution_conflicts():
     return conflicts
 
 
-def main(package_only=False):
+def source_checkpoint(audit):
+    return hashlib.sha256(json.dumps(audit['sha256'], sort_keys=True).encode('utf-8')).hexdigest()
+
+
+def write_executable_info(path):
+    # Windows requires fixed numeric resource fields; no product release version is exposed.
+    fixed_info = (0, 0, 0, 0)
+    properties = {'CompanyName': 'Sunrise Group', 'ProductName': APP_NAME,
+                  'FileDescription': 'Sunrise Image document image tools',
+                  'InternalName': 'SunriseImage', 'OriginalFilename': ENTRY_EXECUTABLE,
+                  'LegalCopyright': 'Copyright © 2026 Sunrise Group. All rights reserved.'}
+    strings = ','.join(f'StringStruct({key!r}, {value!r})' for key, value in properties.items())
+    path.write_text(f"VSVersionInfo(ffi=FixedFileInfo(filevers={fixed_info!r}, prodvers={fixed_info!r}, mask=0x3f, flags=0, OS=0x40004, fileType=1, subtype=0, date=(0,0)), kids=[StringFileInfo([StringTable('040904B0', [{strings}])]), VarFileInfo([VarStruct('Translation', [1033, 1200])])])", encoding='utf-8')
+
+
+def main(package_only=False, profile=DEFAULT_PROFILE):
     AUDIT.mkdir(exist_ok=True)
     summary = {
         'status': 'FAILED',
+        'profile': profile,
+        'qualification': 'BUILD_GATE_PENDING',
+        'official_release': False,
+        'update_notice_integration': 'NOT_APPLICABLE (product has no update or notice feature)',
         'platform': platform.system(),
         'architecture': platform.machine(),
         'mode': 'package_existing_executable' if package_only else 'build_and_package',
@@ -166,21 +195,38 @@ def main(package_only=False):
     staged_root = None
     built_dist = DIST
     try:
+        if profile not in {'BUILD_MIN', 'RELEASE_MIN'}:
+            raise ValueError('Unknown build profile')
         if platform.system() != 'Windows':
             raise RuntimeError('Windows EXE must be built on Windows. No Windows artifact was generated.')
-        if sys.version_info[:2] < (3, 10) or struct.calcsize('P') != 8:
-            raise RuntimeError('Use 64-bit Python 3.10+ for the release build.')
+        if sys.version_info[:2] != (3, 12) or struct.calcsize('P') != 8 or platform.machine().lower() not in {'amd64', 'x86_64'}:
+            raise RuntimeError('Use the declared 64-bit Python 3.12 build toolchain.')
         stage = 'source_audit'
         source = check_source_audit()
-        summary['stages']['source_audit'] = 'PASS reused (hashes match; full tests are not rerun)'
+        summary['stages']['source_audit'] = 'REUSED_PASS'
         if package_only:
             if not (DIST / 'SunriseImage.exe').is_file():
                 raise RuntimeError('Existing dist/SunriseImage/SunriseImage.exe is missing. Run EXE_빌드.bat first.')
+            staged_root = AUDIT / 'package_staging' / uuid.uuid4().hex
+            built_dist = staged_root / 'SunriseImage'
+            shutil.copytree(DIST, built_dist)
+            if profile == 'RELEASE_MIN':
+                previous_identity = json.loads((DIST / 'package_info.json').read_text(encoding='utf-8'))
+                if (previous_identity.get('source_checkpoint') != source_checkpoint(source)
+                        or previous_identity.get('source_binding') != 'built_from_checkpoint'
+                        or previous_identity.get('executable_sha256') != hashlib.sha256((DIST / ENTRY_EXECUTABLE).read_bytes()).hexdigest()):
+                    raise RuntimeError('Existing EXE source checkpoint does not match; rebuild before official release.')
             summary['stages']['dependencies'] = 'SKIPPED (reuse installed environment)'
             summary['stages']['build'] = 'REUSED existing EXE; no compilation'
             summary['existing_exe_matches_current_app_sources'] = 'NOT VERIFIED (packaging-only mode does not update application code)'
         else:
             stage = 'dependencies'
+            try:
+                conflicts = _pyside6_distribution_conflicts()
+            except importlib.metadata.PackageNotFoundError:
+                conflicts = []
+            if conflicts:
+                raise RuntimeError('PySide6 버전 충돌: 독립 Python 환경이 필요합니다. 공용 패키지를 변경하지 않습니다.')
             if _dependencies_ready():
                 print('1/3: Build dependencies already installed in Python environment (versions match; skipping pip install)...', flush=True)
                 (AUDIT / '01_dependencies.log').write_text('All required packages already installed in system Python.\n', encoding='utf-8')
@@ -197,19 +243,23 @@ def main(package_only=False):
                 summary['dependency_warnings'] = conflicts
                 print('[WARN] 전체 Python 환경에 구버전 PySide6 메타패키지가 남아 있습니다:',
                       '; '.join(conflicts), flush=True)
-                print('[WARN] 다른 프로젝트의 패키지를 자동으로 삭제하지 않습니다. '
-                      '해당 환경을 확인해 주세요.', flush=True)
+                raise RuntimeError('PySide6 버전이 충돌합니다. Python 3.12 독립 환경에서 빌드하세요. 공용 패키지는 변경하지 않습니다.')
             # Never COLLECT into the existing release folder: it might be in use,
             # read-only, or hold a partially collected file from a prior failed build.
             staged_root = AUDIT / 'build_staging' / uuid.uuid4().hex
             staged_root.mkdir(parents=True, exist_ok=False)
             built_dist = staged_root / 'SunriseImage'
+            version_file = staged_root / 'version_info.txt'
+            write_executable_info(version_file)
             args = [
-                sys.executable, '-m', 'PyInstaller', '--noconfirm', '--windowed', '--onedir', '--noupx',
+                sys.executable, '-m', 'PyInstaller', '--noconfirm', '--windowed', '--onedir', '--noupx', '--clean',
+                '--workpath', str(staged_root / 'work'),
+                '--specpath', str(staged_root),
+                '--version-file', str(version_file),
                 '--distpath', str(staged_root),
                 '--name', 'SunriseImage',
-                '--icon', 'assets/sunrise_image.ico',
-                '--add-data', 'assets:assets',
+                '--icon', str(ROOT / 'assets' / 'sunrise_image.ico'),
+                '--add-data', str(ROOT / 'assets') + os.pathsep + 'assets',
                 # Sunrise Image uses PySide6 only. Other Qt bindings installed in a
                 # shared Python environment must not trigger incompatible hooks.
                 '--exclude-module', 'PyQt5',
@@ -225,8 +275,8 @@ def main(package_only=False):
                 '--exclude-module', 'pytest',
                 '--copy-metadata', 'PyMuPDF',
                 '--copy-metadata', 'defusedxml',
-                '--add-data', 'THIRD_PARTY_NOTICES.md:.',
-                'app_entry.py',
+                '--add-data', str(ROOT / 'THIRD_PARTY_NOTICES.md') + os.pathsep + '.',
+                str(ROOT / 'app_entry.py'),
             ]
             stage = 'build'
             print('2/3: Building Windows EXE (dist/SunriseImage/SunriseImage.exe)...', flush=True)
@@ -235,15 +285,22 @@ def main(package_only=False):
         exe = built_dist / 'SunriseImage.exe'
         if not exe.is_file():
             raise RuntimeError(f'PyInstaller returned success but EXE is missing: {exe}')
+        stage = 'package_identity'
+        identity = {'app_id': APP_ID,
+                    'package_kind': PACKAGE_KIND, 'entry_executable': ENTRY_EXECUTABLE,
+                    'source_checkpoint': source_checkpoint(source),
+                    'source_binding': 'unverified_existing_exe' if package_only and profile == 'BUILD_MIN' else 'built_from_checkpoint'}
+        (built_dist / 'package_info.json').write_text(json.dumps(identity, ensure_ascii=False, indent=2), encoding='utf-8')
+        summary['stages']['package_identity'] = 'PASS'
         executable_hash = hashlib.sha256(exe.read_bytes()).hexdigest()
         stage = 'windows_runtime'
         report = AUDIT / 'WINDOWS_RUNTIME_CHECK.json'
         if report.exists():
             report.unlink()
         print('1/2: Checking existing Windows executable...' if package_only else '3/3: Checking frozen Windows runtime...', flush=True)
-        command([str(exe), '--smoke-test', '--report', str(report)], '03_runtime.log')
+        command([str(exe), '--startup-smoke', '--report', str(report)], '03_runtime.log')
         checked = json.loads(report.read_text(encoding='utf-8'))
-        if checked.get('status') != 'PASS' or not checked.get('windows_verified') or not checked.get('frozen') or checked.get('program') != 'Sunrise Image':
+        if checked.get('status') != 'PASS' or not checked.get('windows_verified') or not checked.get('frozen') or checked.get('program') != APP_NAME or checked.get('app_id') != APP_ID or checked.get('package_kind') != PACKAGE_KIND:
             raise RuntimeError('Frozen Windows runtime did not pass.')
         if hashlib.sha256(exe.read_bytes()).hexdigest() != executable_hash:
             raise RuntimeError('Executable changed during runtime check.')
@@ -253,21 +310,38 @@ def main(package_only=False):
         stage = 'licenses'
         collect_licenses(built_dist / 'licenses')
         summary['stages']['licenses'] = 'PASS'
-        # Only executable components and mandatory third-party notices are
-        # included in the release. User manuals are kept in Drive, not GitHub.
-        summary['stages']['documentation'] = 'SKIPPED (no optional manuals packaged)'
+        stage = 'signing'
+        if profile == 'RELEASE_MIN':
+            command(['powershell.exe', '-NoProfile', '-NonInteractive', '-File',
+                     str(ROOT / 'sign_release.ps1'), '-Executable', str(exe)], '04_signing.log')
+            executable_hash = hashlib.sha256(exe.read_bytes()).hexdigest()
+            summary['stages']['signing'] = 'PASS'
+        else:
+            summary['stages']['signing'] = 'PENDING (development build)'
+        identity['executable_sha256'] = executable_hash
+        (built_dist / 'package_info.json').write_text(json.dumps(identity, ensure_ascii=False, indent=2), encoding='utf-8')
         stage = 'archive'
         release = ROOT / 'release'
         release.mkdir(exist_ok=True)
-        archive = release / 'Sunrise_Image_WINDOWS_x64.zip'
+        archive = release / ('Sunrise_Image.zip' if profile == 'RELEASE_MIN' else 'Sunrise_Image_DEV.zip')
+        if archive.exists():
+            preserved = release / 'preserved' / (uuid.uuid4().hex + '_' + archive.name)
+            preserved.parent.mkdir(exist_ok=True)
+            shutil.copy2(archive, preserved)
         temporary = archive.with_suffix('.zip.tmp')
         try:
             with zipfile.ZipFile(temporary, 'w', zipfile.ZIP_DEFLATED) as z:
                 for file in sorted(built_dist.rglob('*')):
                     if file.is_file():
                         z.write(file, str(file.relative_to(built_dist.parent)))
+            with zipfile.ZipFile(temporary) as verified:
+                if verified.testzip() is not None:
+                    raise RuntimeError('Release ZIP CRC failed')
+                package = json.loads(verified.read('SunriseImage/package_info.json'))
+                if package != identity or 'SunriseImage/' + ENTRY_EXECUTABLE not in verified.namelist():
+                    raise RuntimeError('Release package identity mismatch')
             # The archive is complete. Only now touch the prior distribution.
-            if not package_only:
+            if built_dist != DIST:
                 stage = 'promote'
                 promote_verified_directory(built_dist, DIST, AUDIT)
                 summary['stages']['promote'] = 'PASS (previous dist replaced after runtime verification)'
@@ -278,6 +352,11 @@ def main(package_only=False):
         summary['stages']['archive'] = 'PASS'
         summary.update(
             status='PASS',
+            qualification='PACKAGE_VALIDATED' if not package_only else 'PACKAGE_VALIDATED_SOURCE_BINDING_LIMITED',
+            official_release=False,
+            signed_release_candidate=profile == 'RELEASE_MIN',
+            windows_visual_validation='PENDING',
+            update_notice_integration='NOT_APPLICABLE (product has no update or notice feature)',
             release=str(archive),
             release_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
             executable_sha256=executable_hash,
@@ -315,4 +394,6 @@ def main(package_only=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--package-only', action='store_true', help='Package an existing EXE after a fresh runtime check, without reinstalling or compiling.')
-    sys.exit(main(parser.parse_args().package_only))
+    parser.add_argument('--profile', choices=['BUILD_MIN', 'RELEASE_MIN'], default=DEFAULT_PROFILE)
+    args = parser.parse_args()
+    sys.exit(main(args.package_only, args.profile))

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QListWidget, QMenu, QProgressBar, QSizePolicy, QSplitter,
     QTabWidget, QTextEdit, QToolButton, QTreeWidget, QVBoxLayout, QWidget,
 )
-from ui_theme import brand_logo_pixmap
+from ui_theme import brand_logo_pixmap, _palette
 from ui_widgets import (
     ElidedLabel, PreviewLabel, SmartComboBox, card, hbox, label, make_btn,
     make_combo, spin,
@@ -148,13 +148,14 @@ def build_document_list_group(win) -> QSplitter:
     win.doc_table.setIndentation(0)
     win.doc_table.setAlternatingRowColors(True)
     win.doc_table.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
-    win.doc_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    win.doc_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     win.doc_table.setHeaderLabels(["문서명", "이미지 · 용량", "비고"])
     if win.doc_table.headerItem() is not None:
         for c in range(3):
             win.doc_table.headerItem().setTextAlignment(c, Qt.AlignmentFlag.AlignCenter)
     hdr = win.doc_table.header()
     hdr.setStretchLastSection(False)
+    hdr.setMinimumSectionSize(max(win.doc_table.fontMetrics().horizontalAdvance(h) for h in ['문서명', '이미지 · 용량', '비고']) + 16)
     hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
     hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
     hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
@@ -252,6 +253,7 @@ def build_collection_shared_group(win):
     win.tree.setMinimumHeight(180)
     thdr = win.tree.header()
     thdr.setStretchLastSection(False)
+    thdr.setMinimumSectionSize(max(win.tree.fontMetrics().horizontalAdvance(h) for h in ['형식', '원본 용량', '해상도 px', '자르기 / 위치']) + 16)
     thdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
     for col, w in [(1, 56), (2, 82), (3, 102), (4, 106)]:
         thdr.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
@@ -692,3 +694,88 @@ def build_preview_view_group(dlg) -> QFrame:
     dlg.preview_info = dlg.main_window.preview_info
     preview_layout.addWidget(dlg.preview_info)
     return preview_card
+
+
+def _header_style(p: dict[str, str]) -> str:
+    """Group 2: Top studio header card, preset pills, and theme switcher."""
+    return f"""
+        QFrame#headerCard {{ background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #181625,stop:0.55 #231D38,stop:1 #311E34); border:1px solid #312E52; border-radius:10px; }}
+        QFrame#sunriseBar {{ background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #F97316,stop:0.48 #F59E0B,stop:1 #6366F1); border-radius:1px; }}
+        QLabel#brandMark {{ background:transparent; padding:0px; }}
+        QLabel#title {{ font-size:17px; font-weight:800; color:#FFFFFF; }}
+        QLabel#headerSub {{ color:#E2E8F0; font-size:11px; font-weight:500; }}
+        QLabel#presetCaption {{ color:#FDE68A; font-size:11px; font-weight:700; }}
+        QLabel#badge {{ color:#FED7AA; background:rgba(255,255,255,0.12); border:1px solid rgba(253,186,116,0.50); border-radius:6px; padding:2px 10px; font-size:11px; font-weight:800; }}
+        QPushButton#presetButton {{ background:rgba(255,255,255,0.14); border:1px solid rgba(255,255,255,0.30); border-radius:10px; padding:2px 10px; min-height:20px; font-size:11px; font-weight:700; color:#FFFFFF; }}
+        QPushButton#presetButton:hover {{ background:rgba(249,115,22,0.35); border-color:#FB923C; color:#FFFFFF; }}
+        QPushButton#presetButton[activePreset="true"] {{ background:rgba(249,115,22,0.48); border:1px solid #FB923C; color:#FFFFFF; }}
+        QPushButton#themeButton {{ background:rgba(255,255,255,0.18); border:1px solid rgba(253,230,138,0.55); border-radius:10px; padding:2px 10px; min-height:20px; font-size:11px; font-weight:700; color:#FDE68A; }}
+    """
+
+
+def _document_list_style(p):
+    return f"QFrame#docListCard {{ background:{p['card_bg']}; border:1px solid {p['card_bd']}; border-radius:9px; }}"
+
+
+def _format_style(p):
+    return f"QFrame#formatCard {{ background:{p['card_bg']}; border:1px solid {p['card_bd']}; border-radius:9px; }}"
+
+
+def _resolution_style(p):
+    return f"QFrame#sizeCard {{ background:{p['card_bg']}; border:1px solid {p['card_bd']}; border-radius:9px; }}"
+
+
+def _capacity_style(p):
+    return f"QFrame#capacityCard {{ background:{p['card_bg']}; border:1px solid {p['card_bd']}; border-radius:9px; }}"
+
+
+def _preview_top_style(p):
+    return f"QFrame#previewTopCard {{ background:{p['card_bg']}; border:1px solid {p['card_bd']}; border-radius:9px; }}"
+
+
+def _preview_list_style(p):
+    return f"QFrame#previewListCard {{ background:{p['card_bg']}; border:1px solid {p['card_bd']}; border-radius:9px; }}"
+
+
+def _preview_view_style(p):
+    return f"QFrame#previewViewCard {{ background:{p['card_bg']}; border:1px solid {p['card_bd']}; border-radius:9px; }}"
+
+
+def _progress_style(p):
+    return f"QFrame#progressPanel {{ background:{p['card_bg']}; border:1px solid {p['card_bd']}; border-radius:9px; }}"
+
+def apply_layout_styles(window, dark):
+    """Layout owners hold component geometry; theme supplies only foundation/primitive rules."""
+    p = _palette(dark)
+    roots = [window]
+    if window.preview_dialog is not None:
+        roots.append(window.preview_dialog)
+    providers = {
+        'docListCard': _document_list_style,
+        'formatCard': _format_style,
+        'sizeCard': _resolution_style,
+        'capacityCard': _capacity_style,
+        'previewTopCard': _preview_top_style,
+        'previewListCard': _preview_list_style,
+        'previewViewCard': _preview_view_style,
+        'progressPanel': _progress_style,
+        'headerCard': _header_style,
+    }
+    for root in roots:
+        for role, provider in providers.items():
+            for card_widget in root.findChildren(QFrame, role):
+                card_widget.setStyleSheet(provider(p))
+        for label_widget in root.findChildren(QLabel):
+            name = label_widget.objectName()
+            if name == 'infoNote':
+                label_widget.setStyleSheet(f"""QLabel#infoNote {{ background:{p['note_bg']}; color:{p['note_fg']}; border:1px solid {p['card_bd']}; border-radius:6px; padding:4px 10px; font-size:11px; font-weight:600; }}""")
+            elif name == 'previewMeta':
+                label_widget.setStyleSheet(f"""QLabel#previewMeta {{ background:{p['meta_bg']}; color:{p['meta_fg']}; border:1px solid {p['sub_bd']}; border-radius:6px; padding:4px 10px; font-size:11px; font-weight:700; }}""")
+            elif name == 'summary':
+                label_widget.setStyleSheet(f"""QLabel#summary {{ background:{p['sub_bg']}; color:{p['sub_fg']}; border:1px solid {p['sub_bd']}; border-radius:7px; padding:4px 12px; font-weight:800; font-size:12px; }}""")
+            elif name == 'preview':
+                label_widget.setStyleSheet(f"""QLabel#preview {{ background:{p['input_bg']}; border:1px solid {p['card_bd']}; border-radius:7px; color:{p['muted']}; }}""")
+    # Per-table row geometry belongs to the document/list layout owners.
+    window.doc_table.setStyleSheet(f"""QTreeWidget#docTable::item {{ min-height:28px; padding:2px 4px; border-bottom:1px solid {p['row_bd']}; }}""")
+    window.tree.setStyleSheet(f"""QTreeWidget#imageTree::item {{ min-height:26px; padding:2px 6px; border-bottom:1px solid {p['row_bd']}; }}""")
+    window.document_progress.setStyleSheet("QProgressBar::chunk { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #F97316,stop:1 #F59E0B); border-radius:5px; }")

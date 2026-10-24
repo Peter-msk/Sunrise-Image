@@ -91,10 +91,6 @@ def _qss_base_containers(p: dict[str, str]) -> str:
     return f"""
         QWidget {{ color:{p['fg']}; font-family:"Malgun Gothic","Noto Sans CJK KR","NanumGothic",sans-serif; font-size:12px; }}
         Window, QDialog#previewDialog, QWidget#workspacePanel, QSplitter#documentsSplit {{ background:{p['bg']}; border:0px; }}
-        QFrame#card, QFrame#docListCard, QFrame#formatCard, QFrame#sizeCard, QFrame#capacityCard,
-        QFrame#previewTopCard, QFrame#previewListCard, QFrame#previewViewCard, QFrame#progressPanel {{
-            background:{p['card_bg']}; border:1px solid {p['card_bd']}; border-radius:9px;
-        }}
         QLabel#muted {{ color:{p['muted']}; font-size:11px; }}
         QLabel#fieldLabel {{ color:{p['field']}; font-size:12px; font-weight:700; }}
         QLabel#statusText, QLabel#cardTitle {{ color:{p['fg']}; font-size:12px; font-weight:800; }}
@@ -102,27 +98,6 @@ def _qss_base_containers(p: dict[str, str]) -> str:
         QLabel#stepIndigo, QLabel#pillBadge {{ color:{p['sub_fg']}; background:{p['sub_bg']}; border:1px solid {p['sub_bd']}; border-radius:6px; padding:2px 8px; font-size:11px; font-weight:800; }}
         QLabel#stepViolet {{ color:{p['violet_fg']}; background:{p['violet_bg']}; border:1px solid {p['violet_bd']}; border-radius:6px; padding:2px 7px; font-size:11px; font-weight:800; }}
         QLabel#stepTeal {{ color:{p['teal_fg']}; background:{p['teal_bg']}; border:1px solid {p['teal_bd']}; border-radius:6px; padding:2px 7px; font-size:11px; font-weight:800; }}
-        QLabel#infoNote {{ background:{p['note_bg']}; color:{p['note_fg']}; border:1px solid {p['card_bd']}; border-radius:6px; padding:4px 10px; font-size:11px; font-weight:600; }}
-        QLabel#previewMeta {{ background:{p['meta_bg']}; color:{p['meta_fg']}; border:1px solid {p['sub_bd']}; border-radius:6px; padding:4px 10px; font-size:11px; font-weight:700; }}
-        QLabel#summary {{ background:{p['sub_bg']}; color:{p['sub_fg']}; border:1px solid {p['sub_bd']}; border-radius:7px; padding:4px 12px; font-weight:800; font-size:12px; }}
-        QLabel#preview {{ background:{p['input_bg']}; border:1px solid {p['card_bd']}; border-radius:7px; color:{p['muted']}; }}
-    """
-
-
-def _qss_header_group(p: dict[str, str]) -> str:
-    """Group 2: Top studio header card, preset pills, and theme switcher."""
-    return f"""
-        QFrame#headerCard {{ background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #181625,stop:0.55 #231D38,stop:1 #311E34); border:1px solid #312E52; border-radius:10px; }}
-        QFrame#sunriseBar {{ background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #F97316,stop:0.48 #F59E0B,stop:1 #6366F1); border-radius:1px; }}
-        QLabel#brandMark {{ background:transparent; padding:0px; }}
-        QLabel#title {{ font-size:17px; font-weight:800; color:#FFFFFF; }}
-        QLabel#headerSub {{ color:#E2E8F0; font-size:11px; font-weight:500; }}
-        QLabel#presetCaption {{ color:#FDE68A; font-size:11px; font-weight:700; }}
-        QLabel#badge {{ color:#FED7AA; background:rgba(255,255,255,0.12); border:1px solid rgba(253,186,116,0.50); border-radius:6px; padding:2px 10px; font-size:11px; font-weight:800; }}
-        QPushButton#presetButton {{ background:rgba(255,255,255,0.14); border:1px solid rgba(255,255,255,0.30); border-radius:10px; padding:2px 10px; min-height:20px; font-size:11px; font-weight:700; color:#FFFFFF; }}
-        QPushButton#presetButton:hover {{ background:rgba(249,115,22,0.35); border-color:#FB923C; color:#FFFFFF; }}
-        QPushButton#presetButton[activePreset="true"] {{ background:rgba(249,115,22,0.48); border:1px solid #FB923C; color:#FFFFFF; }}
-        QPushButton#themeButton {{ background:rgba(255,255,255,0.18); border:1px solid rgba(253,230,138,0.55); border-radius:10px; padding:2px 10px; min-height:20px; font-size:11px; font-weight:700; color:#FDE68A; }}
     """
 
 
@@ -302,19 +277,6 @@ def _qss_tables_and_trees_group(p: dict[str, str], asset_dir: str) -> str:
         QListWidget::item:hover, QTreeWidget::item:hover {{ background:{p['sub_bg']}; }}
         QListWidget::item:selected, QTreeWidget::item:selected {{ background:{p['sel_bg']}; color:{p['sel_fg']}; font-weight:700; }}
 
-        /* Main Window 01 Document Table (#docTable) */
-        QTreeWidget#docTable::item {{
-            min-height:28px;
-            padding:2px 4px;
-            border-bottom:1px solid {p['row_bd']};
-        }}
-
-        /* Preview Window Image Check-List Tree (#imageTree) */
-        QTreeWidget#imageTree::item {{
-            min-height:26px;
-            padding:2px 6px;
-            border-bottom:1px solid {p['row_bd']};
-        }}
         QTreeWidget::indicator, QTreeWidget#imageTree::indicator {{
             width:13px;
             height:13px;
@@ -364,7 +326,6 @@ def _qss_progress_and_menus_group(p: dict[str, str]) -> str:
     return f"""
         QProgressBar {{ background:{p['pbar_bg']}; border:1px solid {p['card_bd']}; border-radius:6px; min-height:20px; text-align:center; font-size:11px; font-weight:800; color:{p['fg']}; }}
         QProgressBar::chunk {{ background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6366F1,stop:1 #8B5CF6); border-radius:5px; }}
-        QProgressBar#documentProgress::chunk {{ background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #F97316,stop:1 #F59E0B); border-radius:5px; }}
         QScrollBar:vertical {{ background:{p['bg']}; width:10px; margin:0px; border-radius:5px; }}
         QScrollBar::handle:vertical {{ background:{p['card_bd']}; min-height:24px; border-radius:5px; }}
         QScrollBar::handle:vertical:hover {{ background:#6366F1; }}
@@ -386,7 +347,6 @@ def build_stylesheet(dark: bool, asset_dir: str) -> str:
     p = _palette(dark)
     return "\n".join([
         _qss_base_containers(p),
-        _qss_header_group(p),
         _qss_buttons_group(p, dark),
         _qss_inputs_combos_spins_group(p, asset_dir),
         _qss_form_checkbox_group(p, asset_dir),

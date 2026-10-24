@@ -1,6 +1,7 @@
-"""In-place document image optimization for HWPX, PDF, XLSX, DOCX, and PPTX."""
+"""Optimize embedded images into a new document copy; never overwrite the source."""
 from __future__ import annotations
 import csv
+import html
 import os
 import posixpath
 import re
@@ -11,12 +12,12 @@ import zipfile
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Callable
-from urllib.parse import unquote
+from urllib.parse import unquote, quote
 
-from document_reader import OPTIMIZABLE, open_document
+from document_reader import OPTIMIZABLE, open_document, read_xml_bytes, safe_xml
 from image_engine import (
      FORMATS, VECTOR_EXTS, Cancelled, Settings, _conversion_results,
-    checkpoint, convert_image, fresh_folder, open_raster, safe_name, validate_archive_member,
+    checkpoint, convert_image, fresh_folder, open_raster, safe_name, validate_archive_member, csv_record,
 )
 
 MIME_BY_EXT = {
@@ -46,29 +47,37 @@ def _same_format_ext(ext_a: str, ext_b: str) -> bool:
 
 
 def _decode_xml_bytes(raw: bytes) -> tuple[str, str]:
-    for enc in ('utf-8', 'utf-8-sig', 'utf-16', 'cp949'):
-        try:
-            return raw.decode(enc), enc
-        except UnicodeDecodeError:
-            continue
-    return raw.decode('utf-8', errors='replace'), 'utf-8'
+    if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
+        return raw.decode('utf-16'), 'utf-16'
+    declared = re.search(br'<\?xml[^>]*encoding=[\"\']([^\"\']+)', raw[:200], re.I)
+    encoding = declared.group(1).decode('ascii') if declared else ('utf-8-sig' if raw.startswith(b'\xef\xbb\xbf') else 'utf-8')
+    try:
+        return raw.decode(encoding), encoding
+    except (UnicodeError, LookupError) as exc:
+        raise ValueError('문서 XML 인코딩을 읽을 수 없어 원본을 유지합니다.') from exc
 
 
 def _update_openxml_rels(xml_text: str, rels_filename: str, member_map: dict[str, str]) -> str:
     rels_dir = posixpath.dirname(rels_filename.replace('\\', '/'))
     base_dir = posixpath.dirname(rels_dir) if rels_dir.endswith('/_rels') or rels_dir == '_rels' else rels_dir
 
-    def replace_target(match: re.Match) -> str:
-        prefix, quote, target = match.group(1), match.group(2), match.group(3)
-        raw_t = unquote(target).replace('\\', '/')
-        resolved = raw_t.lstrip('/') if raw_t.startswith('/') else posixpath.normpath(posixpath.join(base_dir, raw_t))
-        if resolved not in member_map:
-            return match.group(0)
-        new_member = member_map[resolved]
-        new_target = ('/' + new_member) if raw_t.startswith('/') else (posixpath.relpath(new_member, base_dir) if base_dir else new_member)
-        return f'{prefix}{quote}{new_target.replace(chr(92), "/")}{quote}'
+    def replace_relationship(match):
+        tag = match.group(0)
+        if re.search(r"\bTargetMode\s*=\s*([\"'])External\1", tag, re.I):
+            return tag
+        def replace_target(target_match):
+            prefix, delimiter, target = target_match.group(1, 2, 3)
+            raw_t = unquote(html.unescape(target)).replace('\\', '/')
+            resolved = raw_t.lstrip('/') if raw_t.startswith('/') else posixpath.normpath(posixpath.join(base_dir, raw_t))
+            if resolved not in member_map:
+                return target_match.group(0)
+            new_member = member_map[resolved]
+            new_target = '/' + new_member if raw_t.startswith('/') else posixpath.relpath(new_member, base_dir or '.')
+            encoded = html.escape(quote(new_target, safe='/.'), quote=True)
+            return f'{prefix}{delimiter}{encoded}{delimiter}'
+        return re.sub(r'(\bTarget\s*=\s*)(["\'])([^"\']+)\2', replace_target, tag)
+    return re.sub(r'<(?:\w+:)?Relationship\b[^>]*>', replace_relationship, xml_text)
 
-    return re.sub(r'(\bTarget\s*=\s*)(["\'])([^"\']+)\2', replace_target, xml_text)
 
 
 def _update_content_types(xml_text: str, member_map: dict[str, str]) -> str:
@@ -101,8 +110,13 @@ def _update_hwpx_hpf(xml_text: str, member_map: dict[str, str]) -> tuple[str, di
         if not href_m:
             return tag
         q, href_val = href_m.group(2), href_m.group(3)
-        norm_href = href_val.replace('\\', '/').lstrip('./')
+        raw_href = unquote(html.unescape(href_val)).replace('\\', '/')
+        norm_href = posixpath.normpath(raw_href).lstrip('/')
         pair = lower_map.get(norm_href.lower())
+        relative = False
+        if pair is None:
+            pair = lower_map.get(posixpath.normpath(posixpath.join('Contents', raw_href)).lower())
+            relative = pair is not None
         if pair is None:
             return tag
         old_m, new_m = pair
@@ -110,7 +124,9 @@ def _update_hwpx_hpf(xml_text: str, member_map: dict[str, str]) -> tuple[str, di
         if id_m:
             id_to_old[id_m.group(2)] = old_m
         new_mime = MIME_BY_EXT.get(PurePosixPath(new_m).suffix.lower())
-        tag = tag[:href_m.start()] + f'{href_m.group(1)}{q}{new_m}{q}' + tag[href_m.end():]
+        href_out = posixpath.relpath(new_m, 'Contents') if relative else new_m
+        href_out = html.escape(quote(href_out, safe='/.'), quote=True)
+        tag = tag[:href_m.start()] + f'{href_m.group(1)}{q}{href_out}{q}' + tag[href_m.end():]
         if new_mime:
             tag = re.sub(r'(\bmedia-type\s*=\s*["\'])([^"\']+)(["\'])', rf'\g<1>{new_mime}\g<3>', tag)
         return tag
@@ -162,6 +178,24 @@ def _update_hwpx_section_xml(
     return re.sub(r'<(?:\w+:)?pic\b(?:(?!</(?:\w+:)?pic>).)*</(?:\w+:)?pic>|<(?:\w+:)?pic\b[^>]*/\s*>', replace_pic, xml_text, flags=re.DOTALL)
 
 
+def _verify_document(path, reader, cancel):
+    checkpoint(cancel)
+    if hasattr(reader, 'doc'):
+        # The caller owns the PDF lock; do not create another PdfReader here.
+        with reader.fitz.open(path) as verified:
+            if verified.needs_pass or verified.page_count != reader.doc.page_count:
+                raise ValueError('생성된 PDF 문서 검증에 실패했습니다.')
+    else:
+        with zipfile.ZipFile(path) as verified:
+            for info in verified.infolist():
+                checkpoint(cancel)
+                with verified.open(info) as stream:
+                    while stream.read(1024 * 1024):
+                        checkpoint(cancel)
+                if info.filename.lower().endswith(('.xml', '.rels', '.hpf', '.rdf')):
+                    safe_xml(verified, info.filename)
+
+
 def optimize_document(
     source: Path,
     destination: Path,
@@ -198,6 +232,8 @@ def optimize_document(
     want_body = s.apply_document_crop or (selected_keys is not None and any(str(k).startswith('occ:') for k in selected_keys))
 
     with tempfile.TemporaryDirectory(prefix="sunrise_image_") as staging, open_document(source, want_body, cancel) as reader:
+        if catalog and Path(catalog.source).resolve() != source.resolve():
+            raise ValueError('선택 목록의 원본문서가 일치하지 않습니다. 목록을 새로고침하세요.')
         current = catalog or reader.catalog()
         if catalog and getattr(catalog, 'fingerprint', None):
             stat = source.stat()
@@ -207,6 +243,8 @@ def optimize_document(
         if selected_keys is not None:
             keys = set(selected_keys)
             if keys - {i.key for i in raw_items}:
+                if ext != '.hwpx':
+                    raise ValueError('선택 목록이 현재 문서와 일치하지 않습니다. 새로고침하세요.')
                 with open_document(source, not want_body, cancel) as alt_reader:
                     alt_cat = alt_reader.catalog()
                 if not (keys - {i.key for i in alt_cat.items}):
@@ -286,14 +324,13 @@ def optimize_document(
                     notes = list(result.notes)
                     out_data, out_ext, out_size = result.data, result.extension, result.size
 
-                    if _same_format_ext(old_ext, out_ext) and eff_base.resize == 'original' and eff_base.rotate == 0 and not eff_base.grayscale and eff_base.dpi is None and len(out_data) >= len(raw_data):
+                    if _same_format_ext(old_ext, out_ext) and eff_base.resize == 'original' and eff_base.rotate == 0 and not eff_base.grayscale and eff_base.alpha == 'keep' and eff_base.dpi is None and len(out_data) >= len(raw_data):
                         out_data, out_size = raw_data, result.source_size
                         notes.append('원본 용량이 이미 더 작아 원본 바이트 유지')
 
                     if _same_format_ext(old_ext, out_ext):
                         new_member = old_member
                     else:
-                        used_lower_names.discard(old_member.replace('\\', '/').lower())
                         p_obj = PurePosixPath(old_member.replace('\\', '/'))
                         candidate = str(p_obj.with_suffix(out_ext))
                         s_idx = 2
@@ -303,9 +340,10 @@ def optimize_document(
                         new_member = candidate
                         used_lower_names.add(new_member.lower())
 
-                    member_map[old_member] = new_member
                     payload = Path(staging) / str(len(payload_map))
                     payload.write_bytes(out_data)
+                    # Publish replacement metadata only after staging succeeds.
+                    member_map[old_member] = new_member
                     payload_map[old_member] = payload
                     size_map[old_member] = (result.source_size, out_size)
 
@@ -332,7 +370,9 @@ def optimize_document(
 
             checkpoint(cancel)
             notify({'type': 'phase', 'message': '문서 생성 및 저장 중…'})
-            temp_doc = output_doc.with_suffix(output_doc.suffix + '.tmp')
+            handle, name = tempfile.mkstemp(prefix='.document_', suffix=source.suffix, dir=folder)
+            os.close(handle)
+            temp_doc = Path(name)
             if ext == '.pdf':
                 try:
                     for item in raster_items:
@@ -347,6 +387,7 @@ def optimize_document(
                             page.replace_image(xref, stream=payload_map[old_m].read_bytes())
                     reader.doc.save(temp_doc, garbage=4, deflate=True)
                     checkpoint(cancel)
+                    _verify_document(temp_doc, reader, cancel)
                     temp_doc.replace(output_doc)
                 finally:
                     temp_doc.unlink(missing_ok=True)
@@ -356,7 +397,7 @@ def optimize_document(
                 if ext == '.hwpx':
                     for fname in existing_names:
                         if fname.replace('\\', '/').lower().endswith('.hpf'):
-                            raw_hpf, enc = _decode_xml_bytes(reader.z.read(fname))
+                            raw_hpf, enc = _decode_xml_bytes(read_xml_bytes(reader.z, fname))
                             updated_hpf, parsed_map = _update_hwpx_hpf(raw_hpf, member_map)
                             id_to_old_member.update(parsed_map)
                             hpf_texts[fname] = updated_hpf.encode(enc)
@@ -376,20 +417,20 @@ def optimize_document(
                             elif fname in hpf_texts:
                                 zout.writestr(fname, hpf_texts[fname], compress_type=zipfile.ZIP_DEFLATED)
                             elif ext == '.hwpx' and re.fullmatch(r'Contents/section\d+\.xml', norm_fname, re.I) and (size_map or member_map):
-                                sec_xml, enc = _decode_xml_bytes(reader.z.read(fname))
+                                sec_xml, enc = _decode_xml_bytes(read_xml_bytes(reader.z, fname))
                                 if size_map:
                                     sec_xml = _update_hwpx_section_xml(sec_xml, id_to_old_member, size_map)
                                 if member_map:
                                     sec_xml = _update_hwpx_aux_xml(sec_xml, member_map)
                                 zout.writestr(fname, sec_xml.encode(enc), compress_type=zipfile.ZIP_DEFLATED)
                             elif ext == '.hwpx' and norm_fname.lower().endswith(('.xml', '.rdf')) and member_map:
-                                aux_xml, enc = _decode_xml_bytes(reader.z.read(fname))
+                                aux_xml, enc = _decode_xml_bytes(read_xml_bytes(reader.z, fname))
                                 zout.writestr(fname, _update_hwpx_aux_xml(aux_xml, member_map).encode(enc), compress_type=zipfile.ZIP_DEFLATED)
                             elif ext in {'.xlsx', '.docx', '.pptx'} and norm_fname.lower().endswith('.rels') and member_map:
-                                rels_xml, enc = _decode_xml_bytes(reader.z.read(fname))
+                                rels_xml, enc = _decode_xml_bytes(read_xml_bytes(reader.z, fname))
                                 zout.writestr(fname, _update_openxml_rels(rels_xml, norm_fname, member_map).encode(enc), compress_type=zipfile.ZIP_DEFLATED)
                             elif ext in {'.xlsx', '.docx', '.pptx'} and norm_fname == '[Content_Types].xml' and member_map:
-                                ct_xml, enc = _decode_xml_bytes(reader.z.read(fname))
+                                ct_xml, enc = _decode_xml_bytes(read_xml_bytes(reader.z, fname))
                                 zout.writestr(fname, _update_content_types(ct_xml, member_map).encode(enc), compress_type=zipfile.ZIP_DEFLATED)
                             else:
                                 with reader.z.open(info) as src, zout.open(fname, 'w') as dst:
@@ -400,6 +441,7 @@ def optimize_document(
                                             break
                                         dst.write(block)
                     checkpoint(cancel)
+                    _verify_document(temp_doc, reader, cancel)
                     temp_doc.replace(output_doc)
                 finally:
                     temp_doc.unlink(missing_ok=True)
@@ -415,8 +457,11 @@ def optimize_document(
                     except FileExistsError:
                         direct_doc = Path(destination) / f'{short_stem}_{suffix}_경량화{source.suffix}'
                         suffix += 1
-                temp_direct = direct_doc.with_suffix(direct_doc.suffix + '.tmp')
+                temp_direct = None
                 try:
+                    fd, temp_name = tempfile.mkstemp(prefix='.copy_', suffix=source.suffix, dir=destination)
+                    os.close(fd)
+                    temp_direct = Path(temp_name)
                     if direct_doc.resolve() != source.resolve():
                         shutil.copy2(output_doc, temp_direct)
                         temp_direct.replace(direct_doc)
@@ -424,12 +469,18 @@ def optimize_document(
                     direct_doc.unlink(missing_ok=True)
                     notify({'type': 'warning', 'message': f'루트 경량화 사본 저장 생략 ({direct_doc.name}): {exc}'})
                 finally:
-                    temp_direct.unlink(missing_ok=True)
+                    if temp_direct is not None:
+                        temp_direct.unlink(missing_ok=True)
         except Cancelled:
             stopped = True
         finally:
             if conversions is not None:
                 conversions.close()
+            if not output_doc.is_file():
+                for row in records:
+                    if row['상태'] != '실패':
+                        row['상태'] = '미저장'
+                        row['비고'] += '; 문서 저장 전 중지 또는 실패'
             fields = [
                 '내부 파일', '목록 ID', '본문 위치', '저장 파일', '상태',
                 '원본 바이트', '출력 바이트', '원본 가로', '원본 세로',
@@ -439,7 +490,7 @@ def optimize_document(
             with (folder / '추출결과.csv').open('w', encoding='utf-8-sig', newline='') as handle:
                 writer = csv.DictWriter(handle, fieldnames=fields, extrasaction='ignore')
                 writer.writeheader()
-                writer.writerows(records)
+                writer.writerows(csv_record(row) for row in records)
 
     output_doc_bytes = output_doc.stat().st_size if output_doc.is_file() else source_doc_bytes
     return {

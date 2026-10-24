@@ -2,6 +2,9 @@
 from __future__ import annotations
 import re
 import uuid
+import logging
+import threading
+from image_engine import Cancelled
 from PySide6.QtCore import QObject, QRunnable, QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QListView, QPushButton,
@@ -90,14 +93,47 @@ class Task(QRunnable):
         self.id = uuid.uuid4().hex
         self.function, self.kind = function, kind
         self.signals = Signals()
+        self._progress_lock = threading.RLock()
+        self._pending_progress = {}
+        self._item_counts = {}
+
+    def flush_progress(self):
+        with self._progress_lock:
+            for val in self._pending_progress.values():
+                self.signals.event.emit({'job': self.id, 'kind': 'progress', 'value': val})
+            self._pending_progress.clear()
+
+    def _progress(self, val):
+        with self._progress_lock:
+            typ = val.get('type')
+            if typ in {'item', 'item_start'}:
+                document = val.get('document', 0)
+                if typ == 'item':
+                    counts = self._item_counts.setdefault(document, {'saved': 0, 'failed': 0, 'warned': 0})
+                    status = val['row']['상태']
+                    counts['failed' if status == '실패' else 'saved'] += 1
+                    counts['warned'] += status == '주의'
+                    val = {**val, '_counts': dict(counts)}
+                # Pop first to preserve the order of the latest item/start events.
+                key = (typ, document)
+                self._pending_progress.pop(key, None)
+                self._pending_progress[key] = val
+            else:
+                self.flush_progress()
+                self.signals.event.emit({'job': self.id, 'kind': 'progress', 'value': val})
 
     def run(self):
-        emit = lambda val: self.signals.event.emit({"job": self.id, "kind": "progress", "value": val})
+        emit = self._progress
         try:
             packet = {"job": self.id, "kind": self.kind, "value": self.function(emit)}
+        except Cancelled as exc:
+            packet = {'job': self.id, 'kind': self.kind, 'error': str(exc), 'cancelled': True}
         except Exception as exc:
+            logging.getLogger('sunrise_image.worker').exception('Task failed: %s', self.kind)
             packet = {"job": self.id, "kind": self.kind, "error": str(exc)}
-        self.signals.event.emit(packet)
+        with self._progress_lock:
+            self.flush_progress()
+            self.signals.event.emit(packet)
 
 
 class SmartButton(QPushButton):

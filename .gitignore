@@ -21,9 +21,17 @@ release/
 Windows_결과/
 *.spec
 *.log
-!verification/unit_tests.log
 
 # Local diagnostic and temporary outputs
 SunriseImage/Diagnostics/
 *.tmp
 *.bak
+
+# Private maintenance material is kept in the source handover package.
+tests/
+benchmarks/
+verification/
+화면예시/
+*.md
+!README.md
+!THIRD_PARTY_NOTICES.md
