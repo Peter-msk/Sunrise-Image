@@ -1,6 +1,18 @@
 {
   "schema_version": 2,
+  "program": "Sunrise Image",
+  "release_label": "최종본",
   "status": "PASS",
+  "qualification": "SOURCE_VALIDATED",
+  "parent_source_sha256": "fd33daab662b9f98475711dc9735de3f3b19c4a884bc6872e1918a058f8c989a",
+  "validation": {
+    "source_checks": "PASS",
+    "prior_unaffected_regression": "REUSED_PASS",
+    "changed_build_signing_checks": 16,
+    "windows_native_verified": false,
+    "actual_authenticode_verified": false,
+    "update_notice_integration": "NOT_APPLICABLE"
+  },
   "sha256": {
     ".gitattributes": "2fbfca658da0c09bebeff38d1baf8a3fcc82e193076e0e6e2f7a2d5cb750943d",
     ".gitignore": "e9da83dcf6c59cbd8f6533e58c53919cec905da9e0645c82b71a7b0e48e0765f",
@@ -32,8 +44,5 @@
     "배포_마무리.bat": "4b3f6efceab6229f8b5fc0ae57e75c3e144a16d621b5c5b40d9520a4fece45c3",
     "설치.bat": "7904288fc3109c903c62af172dc7720e6973d1100168a0db5c0d9b6ee91deb83",
     "실행.bat": "725e41f0cd2b27c3cae2d6d2f457297938db41d0567508e771cf5a597228bad0"
-  },
-  "validation": {
-    "source_checks": "PASS"
   }
 }
