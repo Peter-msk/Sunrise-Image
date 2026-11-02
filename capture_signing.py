@@ -4,7 +4,7 @@ Private keys never leave the Windows CurrentUser\\My store. No .venv, no persist
 policy changes, no TrustedRoot changes and no required timestamp service.
 """
 from __future__ import annotations
-import argparse, hashlib, json, os, re, shutil, struct, subprocess, sys
+import argparse, hashlib, json, os, re, shutil, ssl, struct, subprocess, sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -44,46 +44,22 @@ def _run(argv, cwd):
     return out
 
 
-def _thumbprints(text):
-    """Only parse hash-labelled line data; never include the label's sha1 digits."""
-    values=[]
-    for line in text.splitlines():
-        label=line.lower()
-        if not ('sha1' in label or 'hash' in label or 'thumbprint' in label):
-            continue
-        payload=line.rsplit(':',1)[-1]
-        found=re.search(r'(?<![0-9a-fA-F])([0-9a-fA-F]{40})(?![0-9a-fA-F])',payload)
-        if found:
-            values.append(found.group(1).upper())
-            continue
-        compact=re.sub(r'[^0-9a-fA-F]', '',payload)
-        if len(compact)==40:
-            values.append(compact.upper())
-    return list(dict.fromkeys(values))
+def _fresh_certificate_thumbprint(certificate: Path) -> str:
+    """Identify ONLY the certificate just issued by certreq, never search My store.
 
-
-def _find_cert(certutil, root):
-    # Capture uses the subject-filtered CurrentUser/My certutil store, not root trust.
-    # Missing cert is normal on first run; certutil may exit nonzero for empty store.
-    proc=subprocess.run([str(certutil),'-user','-store','My','Sunrise Group'],cwd=root,
-        stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=30,check=False)
-    content=proc.stdout.decode('utf-8',errors='replace')
-    values=_thumbprints(content)
-    if not values:
-        # Some certutil versions treat search criteria as thumbprint rather
-        # than subject. Enumerate My but only accept blocks with exact subject.
-        all_store=subprocess.run([str(certutil),'-user','-store','My'],cwd=root,
-            stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=30,check=False)
-        content=all_store.stdout.decode('utf-8',errors='replace')
-        blocks=re.split(r'={4,}\s*Certificate\s+\d+\s*={4,}',content,flags=re.I)
-        values=[]
-        for block in blocks:
-            if re.search(r'(?im)^\s*Subject\s*:\s*CN=Sunrise Group\s*$',block):
-                values.extend(_thumbprints(block))
-        values=list(dict.fromkeys(values))
-    if len(values)>1:
-        raise RuntimeError('Multiple Sunrise Group certificates found; manual identity reconciliation required.')
-    return values[0] if values else ''
+    Authenticode's `/sha1` selector uses the SHA-1 fingerprint of the DER
+    public certificate. This is an identifier; the file signature still uses
+    SHA-256. Support DER and PEM output without localized certutil parsing.
+    """
+    raw = certificate.read_bytes()
+    if raw.lstrip().startswith(b'-----BEGIN CERTIFICATE-----'):
+        try:
+            raw = ssl.PEM_cert_to_DER_cert(raw.decode('ascii'))
+        except (UnicodeError, ValueError) as exc:
+            raise RuntimeError('New certreq certificate has malformed PEM encoding') from exc
+    if len(raw) < 128 or raw[0] != 0x30:
+        raise RuntimeError('New certreq certificate is not a valid-looking DER X.509 certificate')
+    return hashlib.sha1(raw).hexdigest().upper()
 
 
 def _create_certificate(certreq, certutil, audit, root):
@@ -107,9 +83,9 @@ def _create_certificate(certreq, certutil, audit, root):
     _run([certreq,'-q','-new',inf,cert],root)
     if not cert.is_file():
         raise RuntimeError('certreq did not produce a public certificate')
-    installed = _run([certutil,'-user','-f','-addstore','My',cert],root)
-    issued = _thumbprints(installed)
-    return cert, (issued[0] if len(issued)==1 else '')
+    issued_thumbprint = _fresh_certificate_thumbprint(cert)
+    _run([certutil,'-user','-f','-addstore','My',cert],root)
+    return cert, issued_thumbprint
 
 
 def _pe_certificate_table(path):
@@ -144,18 +120,15 @@ def sign(exe:Path, audit:Path, root:Path):
     certreq=_find_program('certreq.exe')
     certutil=_find_program('certutil.exe')
     signtool=_find_program('signtool.exe')
-    existing=_find_cert(certutil,root)
-    created=False
-    newcert=None
-    created_thumb = ''
-    if not existing:
-        print('[sign] Existing Sunrise Group certificate missing; provisioning once.',flush=True)
-        newcert, created_thumb = _create_certificate(certreq,certutil,audit,root)
-        existing=_find_cert(certutil,root) or created_thumb
-        created=True
-    if not re.fullmatch('[0-9A-F]{40}',existing):
-        raise RuntimeError('Cannot identify Sunrise Group signing certificate SHA1 thumbprint.')
-    args=[signtool,'sign','/sha1',existing,'/fd','SHA256','/v']
+    # User policy: ALWAYS issue a new certificate on every signing invocation.
+    # Do not enumerate, select, reuse, pin, remove or replace earlier keys.
+    print('[sign] Creating a NEW Sunrise Group certificate for this build; existing certificates are not inspected.',flush=True)
+    newcert, fresh_thumbprint = _create_certificate(certreq,certutil,audit,root)
+    if not re.fullmatch(r'[0-9A-F]{40}',fresh_thumbprint):
+        raise RuntimeError('New certificate has an invalid SHA1 thumbprint.')
+    # Exact-fingerprint selection avoids ambiguity even when many certificates
+    # have the same Subject CN=Sunrise Group.
+    args=[signtool,'sign','/sha1',fresh_thumbprint,'/fd','SHA256','/v']
     timestamp=os.environ.get('SUNRISE_TIMESTAMP_URL','').strip()
     if timestamp:
         parsed=urlsplit(timestamp)
@@ -169,22 +142,19 @@ def sign(exe:Path, audit:Path, root:Path):
     after=_sha(exe)
     if before==after:
         raise RuntimeError('Signing did not modify executable bytes')
+    # The just-issued public certificate is the only certificate exported.
+    # Private keys/PFX never leave CurrentUser\My and no old certs are changed.
     public=audit/CERT_FILE
-    if newcert and newcert.is_file():
-        shutil.copy2(newcert,public)
-    else:
-        try:
-            _run([certutil,'-user','-store','My',existing,public],root)
-        except RuntimeError:
-            # Public .cer is supplementary; a reused cert may not support old certutil export syntax.
-            public.unlink(missing_ok=True)
+    shutil.copy2(newcert, public)
     report={
       'signing_mode':'CAPTURE_STYLE_SELF_SIGNED_AUTHENTICODE',
       'signer_subject':SUBJECT,
-      'signer_thumbprint':existing,
+      'signer_thumbprint':fresh_thumbprint,
+      'eligible_signing_identity_pinned':False,
+      'certificate_selection_policy':'ALWAYS_NEW_PER_SIGNING',
       'signature_type':'Authenticode',
       'windows_signature_status':'SignedCertificateTablePresent',
-      'certificate_created':created,
+      'certificate_created':True,
       'timestamped':bool(timestamp),
       'public_trust_claimed':False,
       'verification_scope':'SignTool success + PE certificate table; not trusted root chain',

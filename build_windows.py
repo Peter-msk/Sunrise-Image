@@ -101,14 +101,14 @@ def command(args, log_name, env=None):
 def check_signing_prerequisites():
     """Capture-grade Windows tools only, NO cert or timestamp prerequisite.
 
-    The current-user cert is created on first signature operation and reused.
+    A FRESH CurrentUser code-signing cert is created on EVERY signature operation.
     A toolchain prerequisite check avoids wasteful PyInstaller recompilation.
     """
     from capture_signing import _find_program
     for name in ('certreq.exe', 'certutil.exe', 'signtool.exe'):
         _find_program(name)
     (AUDIT / '00_signing_preflight.log').write_text(
-        'Capture signing tools available; certificate auto-create/reuse enabled.\n'
+        'Capture signing tools available; NEW certificate per signing operation, no existing cert lookup.\n'
         'No SUNRISE_TIMESTAMP_URL is required.\n', encoding='utf-8')
 
 

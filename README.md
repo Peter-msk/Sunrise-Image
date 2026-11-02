@@ -74,12 +74,10 @@ Windows 배치파일 6종은 UTF-8(BOM 없음), CRLF 줄바꿈으로 배포합�
 ---
 Copyright © 2026 Sunrise Group. All rights reserved.
 
-## 코드서명 자동 생성·재사용 — Sunrise Capture 호환 정책
+## 코드서명 — 매 빌드 신규 생성 (사용자 확정 정책)
 
-기본 `EXE_빌드.bat`은 RELEASE_MIN으로 빌드합니다. `SUNRISE_TIMESTAMP_URL` 환경변수나 사전 생성된 인증서가 없어도 진행합니다. Windows 빌드 PC의 CurrentUser\My에서 기존 `CN=Sunrise Group` 코드서명 인증서와 개인키를 재사용하고, 없을 때만 RSA 3072/SHA256, Code Signing EKU, 비내보내기 개인키를 사용해 자체서명 인증서를 생성합니다. 새로 만든 인증서는 이후 빌드에서 재사용합니다.
+`EXE_빌드.bat`의 `RELEASE_MIN`은 기존 `CN=Sunrise Group` 인증서를 **검색·재사용·선택하지 않습니다.** 서명을 수행할 때마다 Windows `certreq.exe`로 새 RSA 3072/SHA-256 코드서명 인증서를 만들고 `certutil.exe`로 CurrentUser\My에 등록합니다. 방금 생성된 공개 `.cer` 파일의 DER SHA-1 지문을 Python 표준 라이브러리로 계산하여 `signtool.exe sign /sha1`에 직접 전달합니다. 동명이인 인증서가 여러 개 있어도 기존 인증서를 조회하지 않습니다.
 
-`capture_signing.py`는 체크포인트 SHA256 확인 후 Windows 기본 certreq/certutil 및 Windows SDK signtool로 실행합니다. PowerShell 서명 cmdlet은 사용하지 않습니다. 개인키/PFX를 최종 ZIP에 넣거나 사용자 PC의 Trusted Root 인증서 저장소를 변경하지 않습니다. 공개 `.cer`만 `Windows_결과`와 배포 폴더 내 `signing/`에 제공합니다. `WINDOWS_SIGNING_RESULT.json`에 서명자, 지문, PE Authenticode 인증서 테이블 확인 결과, 타임스탬프 사용 여부를 기록하고 서명 후 EXE SHA256을 최종 패키지에 반영합니다.
+기존 인증서는 그대로 보존합니다. 개인키는 내보내지 않고 기존 인증서 저장소·Trusted Root·전역 Python·PowerShell 실행 정책은 변경하지 않습니다. `SUNRISE_TIMESTAMP_URL`은 선택사항입니다. `WINDOWS_SIGNING_RESULT.json`에 `certificate_created=true`, `certificate_selection_policy=ALWAYS_NEW_PER_SIGNING`, 서명에 사용한 신규 지문과 EXE SHA256을 기록합니다. 이전 버전의 `SUNRISE_SIGNING_IDENTITY.json`과 `SUNRISE_SIGNING_THUMBPRINT` 설정은 새 서명 과정에서 사용하지 않습니다.
 
-**자체서명 Authenticode는 Windows의 공인 발행자 신뢰나 SmartScreen 평판을 자동 확보하지 않습니다.** 표준 Capture형 내부 서명 배포 후보로 분류하고, 최종 운영 승인/실제 사용자 문서 처리는 별도로 확인합니다. 공인 신뢰가 필요한 외부 배포는 적절한 공인 코드서명 인증서를 사용해야 합니다.
-
-기존 Windows PC에서 PyInstaller 및 frozen startup 검사는 PASS했으나, 이 소스의 신규 인증서 생성/서명/최종 ZIP은 Windows 실제 환경에서 다시 확인해야 합니다.
+**유의:** 빌드마다 새 인증서를 만들면 서명자 지문이 계속 바뀌므로 발행자 신뢰의 연속성이 없습니다. 자체서명은 공인 CA 신뢰나 Windows SmartScreen 통과를 보증하지 않으며, 예전 인증서/개인키도 삭제하지 않으므로 시간이 지나면 Windows 사용자 인증서 저장소에 여러 인증서가 누적됩니다. 외부 공인 배포를 위한 코드서명과 혼동해서는 안 됩니다.
