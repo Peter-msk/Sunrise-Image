@@ -49,7 +49,7 @@ def _thumbprints(text):
     values=[]
     for line in text.splitlines():
         label=line.lower()
-        if not ('sha1' in label or 'hash' in label):
+        if not ('sha1' in label or 'hash' in label or 'thumbprint' in label):
             continue
         payload=line.rsplit(':',1)[-1]
         found=re.search(r'(?<![0-9a-fA-F])([0-9a-fA-F]{40})(?![0-9a-fA-F])',payload)
@@ -65,12 +65,24 @@ def _thumbprints(text):
 def _find_cert(certutil, root):
     # Capture uses the subject-filtered CurrentUser/My certutil store, not root trust.
     # Missing cert is normal on first run; certutil may exit nonzero for empty store.
-    proc=subprocess.run([str(certutil),'-user','-store','My',SUBJECT],cwd=root,
+    proc=subprocess.run([str(certutil),'-user','-store','My','Sunrise Group'],cwd=root,
         stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=30,check=False)
     content=proc.stdout.decode('utf-8',errors='replace')
     values=_thumbprints(content)
+    if not values:
+        # Some certutil versions treat search criteria as thumbprint rather
+        # than subject. Enumerate My but only accept blocks with exact subject.
+        all_store=subprocess.run([str(certutil),'-user','-store','My'],cwd=root,
+            stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=30,check=False)
+        content=all_store.stdout.decode('utf-8',errors='replace')
+        blocks=re.split(r'={4,}\s*Certificate\s+\d+\s*={4,}',content,flags=re.I)
+        values=[]
+        for block in blocks:
+            if re.search(r'(?im)^\s*Subject\s*:\s*CN=Sunrise Group\s*$',block):
+                values.extend(_thumbprints(block))
+        values=list(dict.fromkeys(values))
     if len(values)>1:
-        raise RuntimeError('More than one Sunrise Group certificate; select/reconcile without silently replacing an existing key.')
+        raise RuntimeError('Multiple Sunrise Group certificates found; manual identity reconciliation required.')
     return values[0] if values else ''
 
 
@@ -95,8 +107,9 @@ def _create_certificate(certreq, certutil, audit, root):
     _run([certreq,'-q','-new',inf,cert],root)
     if not cert.is_file():
         raise RuntimeError('certreq did not produce a public certificate')
-    _run([certutil,'-user','-f','-addstore','My',cert],root)
-    return cert
+    installed = _run([certutil,'-user','-f','-addstore','My',cert],root)
+    issued = _thumbprints(installed)
+    return cert, (issued[0] if len(issued)==1 else '')
 
 
 def _pe_certificate_table(path):
@@ -134,10 +147,11 @@ def sign(exe:Path, audit:Path, root:Path):
     existing=_find_cert(certutil,root)
     created=False
     newcert=None
+    created_thumb = ''
     if not existing:
         print('[sign] Existing Sunrise Group certificate missing; provisioning once.',flush=True)
-        newcert=_create_certificate(certreq,certutil,audit,root)
-        existing=_find_cert(certutil,root)
+        newcert, created_thumb = _create_certificate(certreq,certutil,audit,root)
+        existing=_find_cert(certutil,root) or created_thumb
         created=True
     if not re.fullmatch('[0-9A-F]{40}',existing):
         raise RuntimeError('Cannot identify Sunrise Group signing certificate SHA1 thumbprint.')

@@ -47,6 +47,8 @@ jobs:
           $exe = 'dist/SunriseImage/SunriseImage.exe'
           $actual = (Get-FileHash -Algorithm SHA256 $exe).Hash
           if ($actual -ne $build.executable_sha256 -or $actual -ne $sig.executable_sha256_after_signing) { throw 'Signed hash mismatch' }
+          $reused = python -c "import capture_signing as cs; from pathlib import Path; print(cs._find_cert(cs._find_program('certutil.exe'),Path.cwd()))"
+          if ($LASTEXITCODE -ne 0 -or $reused.Trim() -ne $sig.signer_thumbprint) { throw 'Certificate reuse lookup mismatch' }
           $zpath = 'release/Sunrise_Image.zip'
           if (-not (Test-Path $zpath)) { throw 'Missing output ZIP' }
           $z = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zpath).Path)
