@@ -55,12 +55,13 @@ def _failure_hint(log_name: str, details: str) -> str:
     return '로그 마지막 부분의 원래 예외 메시지를 확인하세요. Windows_결과/WINDOWS_BUILD_RESULT.json에도 기록됩니다.'
 
 
-def command(args, log_name):
+def command(args, log_name, env=None):
     log_path = AUDIT / log_name
     # Do not hide the child process failure behind a generic return-code message.
     with log_path.open('w', encoding='utf-8') as log:
         result = subprocess.run(args, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=False,
-                                timeout=1800 if log_name == '02_pyinstaller.log' else 600 if log_name == '01_dependencies.log' else 90)
+                                timeout=1800 if log_name == '02_pyinstaller.log' else 900 if log_name == '01_dependencies.log' else 90,
+                                env=env)
     if result.returncode:
         tail = _log_tail(log_path)
         hint = _failure_hint(log_name, tail)
@@ -75,20 +76,109 @@ def command(args, log_name):
                            f'log={log_path}; hint={hint}')
 
 
-def _dependencies_ready() -> bool:
-    requirements = (ROOT / 'requirements.txt').read_text(encoding='utf-8').splitlines() + (ROOT / 'requirements-build.txt').read_text(encoding='utf-8').splitlines()
-    for entry in requirements:
-        entry = entry.strip()
-        if not entry or entry.startswith('#'):
-            continue
-        name, expected = entry.split('==', 1)
-        try:
-            if importlib.metadata.version(name) != expected:
-                return False
-        except importlib.metadata.PackageNotFoundError:
-            return False
-    return True
+def _requirements():
+    """Only pinned packages are allowed in a reproducible official build."""
+    entries = []
+    for filename in ('requirements.txt', 'requirements-build.txt'):
+        for line in (ROOT / filename).read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            name, separator, expected = line.partition('==')
+            if not separator or not name or not expected:
+                raise RuntimeError(f'Expected pinned dependency in {filename}: {line}')
+            entries.append((name, expected))
+    return entries
 
+
+def _dependencies_ready(search_path=None) -> bool:
+    """Check exact versions in system Python, or exclusively inside our private target."""
+    if search_path is None:
+        for name, expected in _requirements():
+            try:
+                if importlib.metadata.version(name) != expected:
+                    return False
+            except importlib.metadata.PackageNotFoundError:
+                return False
+        return True
+    installed = {}
+    for dist in importlib.metadata.distributions(path=[str(search_path)]):
+        name = (dist.metadata.get('Name') or '').lower().replace('_', '-').replace('.', '-')
+        installed[name] = dist.version
+    return all(installed.get(name.lower().replace('_', '-').replace('.', '-')) == expected
+               for name, expected in _requirements())
+
+
+def _dependency_fingerprint():
+    return hashlib.sha256(b'\0'.join((ROOT / filename).read_bytes()
+                                   for filename in ('requirements.txt', 'requirements-build.txt'))).hexdigest()
+
+
+def prepare_build_dependencies():
+    """No .venv and NEVER pip-install into a shared Python environment.
+
+    Use existing exact system requirements when safe. For missing/mismatched requirements
+    or an incompatible PySide6 metapackage, install a complete *private* site-packages
+    overlay under Windows_결과; no system package is uninstalled or upgraded.
+    """
+    conflicts = _pyside6_distribution_conflicts()
+    if _dependencies_ready() and not conflicts:
+        (AUDIT / '01_dependencies.log').write_text(
+            'All pinned build dependencies present; system packages unchanged.\n', encoding='utf-8')
+        return None, 'PASS (reused exact system dependencies)', []
+    if conflicts:
+        print('[INFO] System Qt metadata differs: ' + '; '.join(conflicts), flush=True)
+        print('[INFO] Using private build packages; system PySide6 is not modified.', flush=True)
+    overlay = AUDIT / 'private_build_packages'
+    marker = overlay / '_sunrise_dependency_checkpoint.json'
+    fingerprint = _dependency_fingerprint()
+    if marker.is_file():
+        try:
+            saved = json.loads(marker.read_text(encoding='utf-8'))
+            if saved.get('requirements_sha256') == fingerprint and _dependencies_ready(overlay):
+                (AUDIT / '01_dependencies.log').write_text(
+                    'Reused pinned private build packages; system packages unchanged.\n', encoding='utf-8')
+                return overlay, 'PASS (reused private build packages)', conflicts
+        except (OSError, ValueError, KeyError):
+            pass
+    staged = AUDIT / ('private_packages_staging_' + uuid.uuid4().hex)
+    staged.mkdir(parents=True, exist_ok=False)
+    try:
+        print('1/3: Installing pinned dependencies into private build folder (no venv; no global pip changes)...', flush=True)
+        command([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check',
+                 '--no-warn-script-location', '--ignore-installed', '--target', str(staged),
+                 '-r', 'requirements.txt', '-r', 'requirements-build.txt'], '01_dependencies.log')
+        if not _dependencies_ready(staged):
+            raise RuntimeError('Private build packages do not match pinned requirements; see 01_dependencies.log')
+        (staged / '_sunrise_dependency_checkpoint.json').write_text(
+            json.dumps({'requirements_sha256': fingerprint}, indent=2), encoding='utf-8')
+        if overlay.exists():
+            backup = AUDIT / ('previous_private_packages_' + uuid.uuid4().hex)
+            overlay.rename(backup)
+            try:
+                staged.rename(overlay)
+            except Exception:
+                backup.rename(overlay)
+                raise
+            # Old private packages are disposable cache, not end-user data.
+            try:
+                shutil.rmtree(backup)
+            except OSError:
+                print('[WARN] Previous private package cache not removed: ' + str(backup), flush=True)
+        else:
+            staged.rename(overlay)
+    finally:
+        if staged.exists():
+            shutil.rmtree(staged, ignore_errors=True)
+    return overlay, 'PASS (created private build packages)', conflicts
+
+
+def private_python_environment(overlay):
+    """Child import path takes priority without changing shared Python packages."""
+    env = dict(os.environ)
+    env['PYTHONPATH'] = str(overlay)
+    env['PYTHONNOUSERSITE'] = '1'
+    return env
 
 
 def collect_licenses(destination):
@@ -195,6 +285,7 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
     }
     stage = 'platform'
     staged_root = None
+    overlay = None
     built_dist = DIST
     try:
         if profile not in {'BUILD_MIN', 'RELEASE_MIN'}:
@@ -223,29 +314,15 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
             summary['existing_exe_matches_current_app_sources'] = 'NOT VERIFIED (packaging-only mode does not update application code)'
         else:
             stage = 'dependencies'
-            try:
-                conflicts = _pyside6_distribution_conflicts()
-            except importlib.metadata.PackageNotFoundError:
-                conflicts = []
-            if conflicts:
-                raise RuntimeError('PySide6 버전 충돌: 독립 Python 환경이 필요합니다. 공용 패키지를 변경하지 않습니다.')
-            if _dependencies_ready():
-                print('1/3: Build dependencies already installed in Python environment (versions match; skipping pip install)...', flush=True)
-                (AUDIT / '01_dependencies.log').write_text('All required packages already installed in system Python.\n', encoding='utf-8')
-                summary['stages']['dependencies'] = 'PASS (reused system Python packages)'
-            else:
-                print('1/3: Installing missing build dependencies into current Python...', flush=True)
-                command([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt', '-r', 'requirements-build.txt'], '01_dependencies.log')
-                summary['stages']['dependencies'] = 'PASS'
-            try:
-                conflicts = _pyside6_distribution_conflicts()
-            except importlib.metadata.PackageNotFoundError:
-                conflicts = []
+            overlay, dependency_status, conflicts = prepare_build_dependencies()
+            summary['stages']['dependencies'] = dependency_status
+            summary['dependency_scope'] = 'private' if overlay is not None else 'system_exact_pins'
             if conflicts:
                 summary['dependency_warnings'] = conflicts
-                print('[WARN] 전체 Python 환경에 구버전 PySide6 메타패키지가 남아 있습니다:',
-                      '; '.join(conflicts), flush=True)
-                raise RuntimeError('PySide6 버전이 충돌합니다. Python 3.12 독립 환경에서 빌드하세요. 공용 패키지는 변경하지 않습니다.')
+            if overlay is not None:
+                # collect_licenses reads package metadata in this process. The child
+                # PyInstaller process separately gets PYTHONPATH pointing to the overlay.
+                sys.path.insert(0, str(overlay))
             # Never COLLECT into the existing release folder: it might be in use,
             # read-only, or hold a partially collected file from a prior failed build.
             staged_root = AUDIT / 'build_staging' / uuid.uuid4().hex
@@ -282,7 +359,14 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
             ]
             stage = 'build'
             print('2/3: Building Windows EXE (dist/SunriseImage/SunriseImage.exe)...', flush=True)
-            command(args, '02_pyinstaller.log')
+            if overlay is not None:
+                # -S prevents system/user site-packages (including stale Qt bindings)
+                # from leaking into this private PyInstaller build process.
+                isolated_args = [args[0], '-S', *args[1:]]
+                isolated_args.extend(['--paths', str(overlay)])
+                command(isolated_args, '02_pyinstaller.log', env=private_python_environment(overlay))
+            else:
+                command(args, '02_pyinstaller.log')
             summary['stages']['build'] = 'PASS'
         exe = built_dist / 'SunriseImage.exe'
         if not exe.is_file():
@@ -384,6 +468,8 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
                                           '출력 폴더 교체만 실패한 상태입니다.')
         print(summary['error'])
     finally:
+        if overlay is not None and str(overlay) in sys.path:
+            sys.path.remove(str(overlay))
         if staged_root is not None and staged_root.exists() and summary['status'] == 'PASS':
             try:
                 shutil.rmtree(staged_root)
