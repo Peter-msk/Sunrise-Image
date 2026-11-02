@@ -37,8 +37,9 @@ exit /b 0
 :failed
 echo.
 echo [실패] 빌드 또는 실행 확인 실패.
-echo - 실제 PyInstaller 오류가 위에 표시됩니다.
-echo - 상세 로그: Windows_결과\02_pyinstaller.log
+echo - 실패 단계에 따라 의존성 또는 PyInstaller 오류가 위에 표시됩니다.
+echo - 의존성 로그: Windows_결과\01_dependencies.log
+echo - 패키징 로그: Windows_결과\02_pyinstaller.log
 echo - 결과 요약: Windows_결과\WINDOWS_BUILD_RESULT.json
 pause
 exit /b 1
