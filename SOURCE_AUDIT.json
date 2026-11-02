@@ -6,10 +6,11 @@
   "qualification": "SOURCE_VALIDATED",
   "parent_source_sha256": "fd33daab662b9f98475711dc9735de3f3b19c4a884bc6872e1918a058f8c989a",
   "validation": {
-    "source_checks": "PASS (targeted build/package tests 14; group boundary tests 19)",
+    "source_checks": "PASS (14 build/package tests; non-GUI group boundary tests PASS)",
     "windows_native_verified": false,
     "actual_authenticode_verified": false,
-    "group_path_policy": "SOURCE_IMPLEMENTED_WINDOWS_PENDING"
+    "group_path_policy": "SOURCE_IMPLEMENTED_WINDOWS_PENDING",
+    "gui_tests": "PENDING (PySide6 unavailable in current environment)"
   },
   "sha256": {
     ".gitattributes": "2fbfca658da0c09bebeff38d1baf8a3fcc82e193076e0e6e2f7a2d5cb750943d",
