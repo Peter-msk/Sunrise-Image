@@ -46,3 +46,7 @@ Windows x64 / Python 3.12에서 `EXE_빌드.bat`을 직접 실행합니다. `.ve
 ### Windows 배치파일 호환성
 
 공식 소스의 `*.bat` 6개는 UTF-8(BOM 없음) + Windows CRLF 줄바꿈을 사용하며, 시작 시 코드페이지 65001을 지정합니다. LF 전용 배치파일과 혼용하지 마세요. `EXE_빌드.bat`은 Python 3.12 x64를 확인하고 오류코드를 반환합니다. 배포 ZIP 교체 실패 시 이전 `dist` 폴더를 복원하도록 소스 파이프라인을 보완했습니다. 실제 Windows `cmd.exe`, PyInstaller, 서명 및 GUI 확인은 별도 검증이 필요합니다.
+
+### 서명 정책 차단 대응 (Windows)
+
+공식 `RELEASE_MIN` 빌드는 서명 전 `00_signing_preflight.log`에서 `CN=Sunrise Group` 인증서(개인키 포함) 및 승인된 `SUNRISE_TIMESTAMP_URL` HTTPS 설정을 확인합니다. 서명 스크립트는 `SOURCE_AUDIT.json` SHA256을 재확인한 다음 **서명 단계의 PowerShell 자식 프로세스에만** `-ExecutionPolicy Bypass`를 적용하여 실행합니다. Windows의 `MachinePolicy`/`UserPolicy` 그룹 정책은 우회하지 않고, 시스템 전체 실행 정책을 변경하지 않습니다. 서명/타임스탬프가 없거나 검증에 실패하면 공식 ZIP은 승격하지 않습니다. Windows 사용자 실빌드에서는 PyInstaller와 startup smoke가 PASS했으나, 공식 Authenticode·타임스탬프는 추가 확인이 필요합니다.

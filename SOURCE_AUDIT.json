@@ -6,13 +6,15 @@
   "qualification": "SOURCE_VALIDATED",
   "parent_source_sha256": "fd33daab662b9f98475711dc9735de3f3b19c4a884bc6872e1918a058f8c989a",
   "validation": {
-    "source_checks": "PASS (Windows batch, dependency, package, sign gate targeted; Windows runtime PENDING)",
-    "windows_native_verified": false,
+    "source_checks": "SOURCE_VALIDATED (prior 42; signing correction tests targeted)",
+    "windows_native_verified": true,
     "actual_authenticode_verified": false,
     "group_path_policy": "SOURCE_IMPLEMENTED_WINDOWS_PENDING",
-    "dependency_isolation": "SOURCE_IMPLEMENTED; WINDOWS_PIP_PYINSTALLER_PENDING",
-    "windows_batch_format": "SOURCE_PASS (6/6 UTF8 BOMless CRLF; actual cmd.exe pending)",
-    "release_rollback": "SOURCE_PASS (archive replacement rollback targeted)"
+    "dependency_isolation": "WINDOWS_PASS (user-submitted logs: isolated PySide6 6.12.0, PyInstaller PASS)",
+    "windows_batch_format": "WINDOWS_PASS (user-run EXE_빌드.bat reached signing)",
+    "release_rollback": "SOURCE_PASS (archive replacement rollback targeted)",
+    "windows_runtime_startup_smoke": "PASS (user-submitted WINDOWS_RUNTIME_CHECK.json, Nov 2 2026)",
+    "signing_execution_policy": "SOURCE_PATCHED; WINDOWS_SIGNATURE_PENDING"
   },
   "sha256": {
     ".gitattributes": "2fbfca658da0c09bebeff38d1baf8a3fcc82e193076e0e6e2f7a2d5cb750943d",
@@ -25,7 +27,7 @@
     "assets/chevron_down.svg": "04164bd281c5446f2bf1504251686e27e280b93d7e5d24f781acede7439826e5",
     "assets/chevron_up.svg": "80104e0a5acc946d830462dfaea9d565e31fab1a0cd9819efe0d98842db59497",
     "assets/sunrise_image.ico": "aba5fb494405a878267fb70b7351b1378a9185001619ab174a5fb6e45811e895",
-    "build_windows.py": "3d36df94a1ed3e86c14dcdf0fb43a3cbedc0ebc57f74cc33565758697d6d314f",
+    "build_windows.py": "9f1dbfa73c1cb354065d3a53b9494853acbefa21f90216272a76d69ea4e8182f",
     "diagnostics.py": "b006b5b8c0e199c80752d82969b719d35d151b126f76dadc6f0f9ac9a606ece9",
     "document_optimizer.py": "670673ff7d30e01798a6f3d854076a138587048fbeb54b1c5f1cbd21c8ca16ad",
     "document_reader.py": "d1ecde6fdcde6ae5ef3981bb6948aa06366f9a65ebba210908bc633c17a3a0fe",

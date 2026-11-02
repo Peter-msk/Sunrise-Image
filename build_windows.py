@@ -49,9 +49,23 @@ def _log_tail(log_path: Path, lines: int = 65) -> str:
 
 def _failure_hint(log_name: str, details: str) -> str:
     """A possible fix, never a claim that the root cause was proven."""
+    lower = details.lower()
+    if log_name in {'00_signing_preflight.log', '04_signing.log'}:
+        if ('execution policy' in lower or 'executionpolicy' in lower or 'cannot be loaded' in lower
+                or 'not digitally signed' in lower or 'unauthorizedaccess' in lower):
+            return ('PowerShell script execution was blocked. The build uses process-only -ExecutionPolicy Bypass '
+                    'for its audited signer; MachinePolicy/UserPolicy Group Policy still takes precedence. '
+                    'If enterprise policy restricts scripts, contact the policy administrator. '
+                    'Do not modify persistent execution policies.')
+        if 'certificate' in lower or 'cert:' in lower:
+            return ('A valid CN=Sunrise Group code-signing certificate with a private key '
+                    'is required in CurrentUser\\My. No unsigned official release is permitted.')
+        if 'timestamp' in lower or 'https://' in lower:
+            return ('Check the approved SUNRISE_TIMESTAMP_URL (HTTPS), network access '
+                    'and a trusted timestamp result. The build must not skip timestamp verification.')
+        return 'Inspect signing log; official releases require both Authenticode and timestamp checks.'
     if log_name != '02_pyinstaller.log':
         return '실제 오류는 해당 단계 로그의 마지막 ERROR/Traceback을 확인하세요.'
-    lower = details.lower()
     if 'multiple qt bindings' in lower or 'more than one qt' in lower:
         return 'Qt 바인딩 중복 수집 오류입니다. PySide6만 패키징하도록 제외 옵션을 적용했습니다.'
     if 'permissionerror' in lower or 'winerror 5' in lower or 'winerror 32' in lower:
@@ -87,6 +101,52 @@ def command(args, log_name, env=None):
         print(f'[진단 안내] {hint}', file=sys.stderr, flush=True)
         raise RuntimeError(f'{log_name}: command failed ({result.returncode}); '
                            f'log={log_path}; hint={hint}')
+
+
+def check_signing_prerequisites():
+    """Fail before expensive PyInstaller work when official signing is impossible.
+
+    This checks certificate availability and an HTTPS timestamp setting with a fixed
+    PowerShell inline command; it NEVER changes local/user/machine execution policy.
+    The later script invocation is isolated to a single child PowerShell process.
+    """
+    from urllib.parse import urlsplit
+    timestamp = os.environ.get('SUNRISE_TIMESTAMP_URL', '').strip()
+    try:
+        parsed = urlsplit(timestamp)
+    except ValueError as exc:
+        raise RuntimeError('Invalid SUNRISE_TIMESTAMP_URL; approved HTTPS timestamp service is required.') from exc
+    if parsed.scheme != 'https' or not parsed.netloc or parsed.username or parsed.password:
+        raise RuntimeError('Set SUNRISE_TIMESTAMP_URL to the approved HTTPS timestamp service before RELEASE_MIN.')
+    preflight = (
+        "$ErrorActionPreference='Stop'; "
+        "$cert=Get-ChildItem Cert:\\CurrentUser\\My -CodeSigningCert | "
+        "Where-Object { $_.Subject -eq 'CN=Sunrise Group' -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date) } | "
+        "Select-Object -First 1; "
+        "if (-not $cert) { throw 'Valid Sunrise Group code signing certificate with private key is missing.' }; "
+        "$mp=Get-ExecutionPolicy -Scope MachinePolicy; $up=Get-ExecutionPolicy -Scope UserPolicy; "
+        "if ($mp -in @('AllSigned','Restricted') -or $up -in @('AllSigned','Restricted')) { "
+        "throw 'Enforced Group Policy requires an authorized signed script; process override is not permitted.' }; "
+        "Write-Output 'Sunrise Group signing preflight: certificate and timestamp configuration OK.'"
+    )
+    command(['powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive',
+             '-Command', preflight], '00_signing_preflight.log')
+
+
+def sign_executable(executable: Path):
+    """Run the SHA-audited signer with a per-process execution policy only.
+
+    This does NOT use Set-ExecutionPolicy and does NOT override Group Policy.
+    No fallback to unsigned output or signature verification bypass is allowed.
+    """
+    script = ROOT / 'sign_release.ps1'
+    audit = json.loads((ROOT / 'SOURCE_AUDIT.json').read_text(encoding='utf-8'))
+    pinned = audit.get('sha256', {}).get('sign_release.ps1')
+    if not pinned or not script.is_file() or hashlib.sha256(script.read_bytes()).hexdigest() != pinned:
+        raise RuntimeError('Signing script missing or SHA256 differs from SOURCE_AUDIT.json; refusing to sign.')
+    command(['powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive',
+             '-ExecutionPolicy', 'Bypass', '-File', str(script),
+             '-Executable', str(executable)], '04_signing.log')
 
 
 def _requirements():
@@ -327,6 +387,10 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
         stage = 'source_audit'
         source = check_source_audit()
         summary['stages']['source_audit'] = 'REUSED_PASS'
+        if profile == 'RELEASE_MIN':
+            stage = 'signing_preflight'
+            check_signing_prerequisites()
+            summary['stages']['signing_preflight'] = 'PASS'
         if package_only:
             if not (DIST / 'SunriseImage.exe').is_file():
                 raise RuntimeError('Existing dist/SunriseImage/SunriseImage.exe is missing. Run EXE_빌드.bat first.')
@@ -428,8 +492,7 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
         summary['stages']['licenses'] = 'PASS'
         stage = 'signing'
         if profile == 'RELEASE_MIN':
-            command(['powershell.exe', '-NoProfile', '-NonInteractive', '-File',
-                     str(ROOT / 'sign_release.ps1'), '-Executable', str(exe)], '04_signing.log')
+            sign_executable(exe)
             executable_hash = hashlib.sha256(exe.read_bytes()).hexdigest()
             summary['stages']['signing'] = 'PASS'
         else:
@@ -496,7 +559,8 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
     except Exception:
         summary['failed_stage'] = stage
         summary['error'] = traceback.format_exc()
-        log_names = {'dependencies': '01_dependencies.log', 'build': '02_pyinstaller.log',
+        log_names = {'signing_preflight': '00_signing_preflight.log',
+                     'dependencies': '01_dependencies.log', 'build': '02_pyinstaller.log',
                      'windows_runtime': '03_runtime.log', 'signing': '04_signing.log'}
         if stage in log_names:
             log_path = AUDIT / log_names[stage]
