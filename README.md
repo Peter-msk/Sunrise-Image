@@ -78,7 +78,7 @@ Copyright © 2026 Sunrise Group. All rights reserved.
 
 기본 `EXE_빌드.bat`은 RELEASE_MIN으로 빌드합니다. `SUNRISE_TIMESTAMP_URL` 환경변수나 사전 생성된 인증서가 없어도 진행합니다. Windows 빌드 PC의 CurrentUser\My에서 기존 `CN=Sunrise Group` 코드서명 인증서와 개인키를 재사용하고, 없을 때만 RSA 3072/SHA256, Code Signing EKU, 비내보내기 개인키를 사용해 자체서명 인증서를 생성합니다. 새로 만든 인증서는 이후 빌드에서 재사용합니다.
 
-`sign_release.ps1`은 체크포인트 SHA256 확인 후 별도 PowerShell 프로세스에서만 실행합니다. 개인키/PFX를 최종 ZIP에 넣거나 사용자 PC의 Trusted Root 인증서 저장소를 변경하지 않습니다. 공개 `.cer`만 `Windows_결과`와 배포 폴더 내 `signing/`에 제공합니다. `WINDOWS_SIGNING_RESULT.json`에 서명자, 지문, 실제 Windows 서명 상태, 타임스탬프 사용 여부를 기록하고 서명 후 EXE SHA256을 최종 패키지에 반영합니다.
+`capture_signing.py`는 체크포인트 SHA256 확인 후 Windows 기본 certreq/certutil 및 Windows SDK signtool로 실행합니다. PowerShell 서명 cmdlet은 사용하지 않습니다. 개인키/PFX를 최종 ZIP에 넣거나 사용자 PC의 Trusted Root 인증서 저장소를 변경하지 않습니다. 공개 `.cer`만 `Windows_결과`와 배포 폴더 내 `signing/`에 제공합니다. `WINDOWS_SIGNING_RESULT.json`에 서명자, 지문, PE Authenticode 인증서 테이블 확인 결과, 타임스탬프 사용 여부를 기록하고 서명 후 EXE SHA256을 최종 패키지에 반영합니다.
 
 **자체서명 Authenticode는 Windows의 공인 발행자 신뢰나 SmartScreen 평판을 자동 확보하지 않습니다.** 표준 Capture형 내부 서명 배포 후보로 분류하고, 최종 운영 승인/실제 사용자 문서 처리는 별도로 확인합니다. 공인 신뢰가 필요한 외부 배포는 적절한 공인 코드서명 인증서를 사용해야 합니다.
 

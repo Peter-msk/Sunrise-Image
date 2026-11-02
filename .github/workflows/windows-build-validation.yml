@@ -27,7 +27,7 @@ jobs:
         run: |
           python -c "import sys,struct; print(sys.version); assert sys.version_info[:2]==(3,12) and struct.calcsize('P')==8"
           $ErrorActionPreference = 'Stop'
-          Get-Command New-SelfSignedCertificate,Set-AuthenticodeSignature,Get-AuthenticodeSignature | Format-Table Name,Source
+          Get-Command certreq.exe,certutil.exe | Format-Table Name,Source
       - name: Build, auto-create or reuse cert, sign and package
         shell: pwsh
         env:

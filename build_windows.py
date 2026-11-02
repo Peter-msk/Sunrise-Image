@@ -53,15 +53,12 @@ def _failure_hint(log_name: str, details: str) -> str:
     if log_name in {'00_signing_preflight.log', '04_signing.log'}:
         if ('execution policy' in lower or 'executionpolicy' in lower or 'cannot be loaded' in lower
                 or 'not digitally signed' in lower or 'unauthorizedaccess' in lower):
-            return ('PowerShell script execution was blocked. The build uses process-only -ExecutionPolicy Bypass '
-                    'for its audited signer; MachinePolicy/UserPolicy Group Policy still takes precedence. '
-                    'If enterprise policy restricts scripts, contact the policy administrator. '
-                    'Do not modify persistent execution policies.')
+            return 'Capture signing does not execute PowerShell .ps1 scripts; verify certreq/certutil/signtool.'
         if 'certificate' in lower or 'cert:' in lower:
-            return 'Windows CurrentUser certificate creation/reuse or signing failed; see 04_signing.log.'
+            return 'Capture certreq/certutil CurrentUser certificate creation or signature failed; see 04_signing.log.'
         if 'timestamp' in lower or 'https://' in lower:
-            return 'Optional timestamp was configured and failed; check SUNRISE_TIMESTAMP_URL or omit it for Capture-style signing.'
-        return 'Inspect signing log; a matching Authenticode signer is required; timestamp is optional for local self-signing.'
+            return 'Optional timestamp failed; unset SUNRISE_TIMESTAMP_URL for Capture-style local signature.'
+        return 'See signing tools log. Capture requires embedded Authenticode from CN=Sunrise Group; timestamp optional.'
     if log_name != '02_pyinstaller.log':
         return '실제 오류는 해당 단계 로그의 마지막 ERROR/Traceback을 확인하세요.'
     if 'multiple qt bindings' in lower or 'more than one qt' in lower:
@@ -102,47 +99,42 @@ def command(args, log_name, env=None):
 
 
 def check_signing_prerequisites():
-    """Capture-style signing: no timestamp URL or pre-installed cert required.
+    """Capture-grade Windows tools only, NO cert or timestamp prerequisite.
 
-    Windows built-in code signing tools will provision a non-exportable cert only
-    if the current user has no usable Sunrise Group code-signing certificate.
-    No trust-root, execution policy or other applications are modified.
+    The current-user cert is created on first signature operation and reused.
+    A toolchain prerequisite check avoids wasteful PyInstaller recompilation.
     """
-    test = (
-        "$ErrorActionPreference='Stop'; "
-        "Get-Command New-SelfSignedCertificate,Set-AuthenticodeSignature,Get-AuthenticodeSignature,Export-Certificate "
-        "-ErrorAction Stop | Out-Null; "
-        "$null=Get-Item 'Cert:\\CurrentUser\\My' -ErrorAction Stop; "
-        "Write-Output 'PASS: Windows Capture-style signing tools ready; certificate may be auto-created.'"
-    )
-    # PowerShell -Command does not load a .ps1 file; no OS-wide policy edits.
-    command(['powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive',
-             '-Command', test], '00_signing_preflight.log')
+    from capture_signing import _find_program
+    for name in ('certreq.exe', 'certutil.exe', 'signtool.exe'):
+        _find_program(name)
+    (AUDIT / '00_signing_preflight.log').write_text(
+        'Capture signing tools available; certificate auto-create/reuse enabled.\n'
+        'No SUNRISE_TIMESTAMP_URL is required.\n', encoding='utf-8')
 
 
 def sign_executable(executable: Path):
-    """SHA-audited signer, per-process PowerShell only, verified report required."""
-    script = ROOT / 'sign_release.ps1'
+    """Run audited stdlib-only Capture signer via Windows certreq/certutil/SignTool."""
+    from capture_signing import _pe_certificate_table
+    script = ROOT / 'capture_signing.py'
     audit = json.loads((ROOT / 'SOURCE_AUDIT.json').read_text(encoding='utf-8'))
-    pinned = audit.get('sha256', {}).get('sign_release.ps1')
+    pinned = audit.get('sha256', {}).get('capture_signing.py')
     if not pinned or not script.is_file() or hashlib.sha256(script.read_bytes()).hexdigest() != pinned:
-        raise RuntimeError('Signing script missing or SHA256 differs from SOURCE_AUDIT.json; refusing to sign.')
+        raise RuntimeError('Capture signing script missing or SHA256 differs from SOURCE_AUDIT.json.')
     output = AUDIT / 'WINDOWS_SIGNING_RESULT.json'
     output.unlink(missing_ok=True)
-    command(['powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive',
-             '-ExecutionPolicy', 'Bypass', '-File', str(script),
-             '-Executable', str(executable), '-ReportPath', str(output)], '04_signing.log')
+    command([sys.executable, '-S', str(script), '--executable', str(executable),
+             '--report', str(output), '--audit-dir', str(AUDIT)], '04_signing.log')
     if not output.is_file():
-        raise RuntimeError('Signer reported success but did not create WINDOWS_SIGNING_RESULT.json.')
+        raise RuntimeError('SignTool reported success but did not create WINDOWS_SIGNING_RESULT.json.')
     signed = json.loads(output.read_text(encoding='utf-8-sig'))
-    required = ('CAPTURE_STYLE_SELF_SIGNED_AUTHENTICODE', 'CN=Sunrise Group', 'Authenticode')
-    if (signed.get('signing_mode') != required[0]
-            or signed.get('signer_subject') != required[1]
-            or signed.get('signature_type') != required[2]
-            or signed.get('windows_signature_status') not in ('Valid','NotTrusted','UnknownError')
+    if (signed.get('signing_mode') != 'CAPTURE_STYLE_SELF_SIGNED_AUTHENTICODE'
+            or signed.get('signer_subject') != 'CN=Sunrise Group'
+            or signed.get('signature_type') != 'Authenticode'
+            or signed.get('windows_signature_status') != 'SignedCertificateTablePresent'
             or not signed.get('signer_thumbprint')
+            or not _pe_certificate_table(executable)
             or signed.get('executable_sha256_after_signing') != hashlib.sha256(executable.read_bytes()).hexdigest()):
-        raise RuntimeError('Signed executable identity or signature report validation failed.')
+        raise RuntimeError('Capture signed executable report/PE signature validation failed.')
     return signed
 
 
@@ -494,7 +486,8 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
             summary['stages']['signing'] = 'PASS (self-signed Authenticode)'
             summary['signing_mode'] = signing['signing_mode']
             summary['signing_thumbprint'] = signing['signer_thumbprint']
-            summary['signing_windows_trust'] = signing['windows_signature_status']
+            summary['signing_windows_trust'] = 'NOT_PUBLICLY_TRUSTED_SELF_SIGNED'
+            summary['signing_verification'] = signing['windows_signature_status']
             summary['signing_timestamped'] = signing['timestamped']
             identity['signing_mode'] = signing['signing_mode']
             identity['signer_thumbprint'] = signing['signer_thumbprint']

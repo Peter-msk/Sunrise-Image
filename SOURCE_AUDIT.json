@@ -15,7 +15,7 @@
     "release_rollback": "SOURCE_PASS (archive replacement rollback targeted)",
     "windows_runtime_startup_smoke": "PASS (user-submitted WINDOWS_RUNTIME_CHECK.json, Nov 2 2026)",
     "signing_execution_policy": "CAPTURE_STYLE_LOCAL_SELF_SIGNING; WINDOWS_DYNAMIC_PENDING",
-    "signing_mode": "AUTO_REUSE_OR_CREATE_RSA3072_SHA256; NO_REQUIRED_TIMESTAMP; WINDOWS_DYNAMIC_PENDING",
+    "signing_mode": "CAPTURE_EXACT_CERTREQ_CERTUTIL_SIGNTOOL; WINDOWS_DYNAMIC_PENDING",
     "windows_signing_verified": false,
     "prior_windows_pyinstaller": "PASS (user-provided log, previous source revision)",
     "prior_windows_frozen_smoke": "PASS (user-provided JSON, previous source revision)"
@@ -31,7 +31,7 @@
     "assets/chevron_down.svg": "04164bd281c5446f2bf1504251686e27e280b93d7e5d24f781acede7439826e5",
     "assets/chevron_up.svg": "80104e0a5acc946d830462dfaea9d565e31fab1a0cd9819efe0d98842db59497",
     "assets/sunrise_image.ico": "aba5fb494405a878267fb70b7351b1378a9185001619ab174a5fb6e45811e895",
-    "build_windows.py": "432ec43610919dfaedff0905f45c1ed098cef3ff122a80612c28b7c425afa2e6",
+    "build_windows.py": "f1ddce292e18cae9e52eac5384cb7bb93bc65cfc04f4a9da6e345a5e96bb559b",
     "diagnostics.py": "b006b5b8c0e199c80752d82969b719d35d151b126f76dadc6f0f9ac9a606ece9",
     "document_optimizer.py": "670673ff7d30e01798a6f3d854076a138587048fbeb54b1c5f1cbd21c8ca16ad",
     "document_reader.py": "d1ecde6fdcde6ae5ef3981bb6948aa06366f9a65ebba210908bc633c17a3a0fe",
@@ -42,7 +42,7 @@
     "requirements-build.txt": "4439c693c19271e4b0bdc56c641c36b3b06010b1b22eae6733cd244d752e85d5",
     "requirements.txt": "6bd5452a2af8926f414c43144a8fba5f809b7d5c2f2bc7b968194abe0aa05e6c",
     "runtime_check.py": "dbe7d0e6891f4f13dcba87da055c57d2ec55875cfc44a90f890f8c54e4e5aa98",
-    "sign_release.ps1": "c2d8cdf46f6fb54bf170abe2965655dd77743cf138941a3789643c852645a8ee",
+    "sign_release.ps1": "ad47d13b3c490e12dabc8ec7ffcb3e4b762bc1a433370c573625d787ddcccd73",
     "ui_layout_groups.py": "a3ab3f1a2514bc943c652ee1f92e7ab88ddaac0fea03ab2c82dd67c5e8b7a773",
     "ui_preview_dialog.py": "32ce3d68b8b4c0ffbd88e288ed768da2ff6055413ac5fc396f6c72ad7cb0a9da",
     "ui_theme.py": "4495423fd21adfc87c718da9f9ba787ded38444f18f069bb245e8ef21a99990f",
@@ -50,6 +50,7 @@
     "공식_릴리즈.bat": "ae35616e5fe5efa1fdc4dcccd21578880efcc8c2ccac92ccaef4a15af7193c0a",
     "배포_마무리.bat": "69649efeb6f85c7487b2bc77dc45792d29d2e34a67e2a5ccc7261d4d9c84def8",
     "설치.bat": "6ce0cc90b05299e7198856acba38c9f4c43c94cf825d7805faec4387a24ba412",
-    "실행.bat": "51dc7fc0632d04320a8ee8db8863df3f63312f7128f7d0868eee6c7e2c128733"
+    "실행.bat": "51dc7fc0632d04320a8ee8db8863df3f63312f7128f7d0868eee6c7e2c128733",
+    "capture_signing.py": "85c14aba9434b59aaaed24f3d99bb71da526031428414a163551a345b29cb509"
   }
 }
