@@ -25,6 +25,19 @@ def check_source_audit():
     for name, digest in audit['sha256'].items():
         if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest:
             raise RuntimeError('Source changed after audit: ' + name)
+    # Windows cmd.exe must not parse an LF-only or BOM-corrupted batch script.
+    # This is a source gate, not a second full runtime test.
+    for script in ROOT.glob('*.bat'):
+        contents = script.read_bytes()
+        if (contents.startswith((b'\xef\xbb\xbf', b'\xff\xfe', b'\xfe\xff'))
+                or b'\x00' in contents or b'\n' not in contents
+                or contents.count(b'\r\n') != contents.count(b'\n')
+                or contents.count(b'\r\n') != contents.count(b'\r')):
+            raise RuntimeError(f'Windows batch encoding/CRLF invalid: {script.name}')
+        try:
+            contents.decode('utf-8', errors='strict')
+        except UnicodeError as exc:
+            raise RuntimeError(f'Windows batch UTF-8 invalid: {script.name}') from exc
     return audit
 
 
@@ -234,6 +247,23 @@ def promote_verified_directory(staged: Path, destination: Path, audit_dir: Path)
         raise
     if backup is not None:
         print(f'[INFO] 이전 빌드 보존: {backup}', flush=True)
+    return backup
+
+
+def restore_promoted_directory(current: Path, staged: Path, backup: Path | None):
+    """Restore the old onedir if final archive replacement failed."""
+    if staged.exists():
+        raise RuntimeError(f'Cannot safely roll back: staged directory already exists: {staged}')
+    current.rename(staged)
+    if backup is not None:
+        try:
+            backup.rename(current)
+        except Exception:
+            # Last resort: put the newly built runnable directory back where it was.
+            # Never delete a previous build or leave the installation folder empty.
+            if not current.exists() and staged.exists():
+                staged.rename(current)
+            raise
 
 
 def _pyside6_distribution_conflicts():
@@ -415,6 +445,8 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
             preserved.parent.mkdir(exist_ok=True)
             shutil.copy2(archive, preserved)
         temporary = archive.with_suffix('.zip.tmp')
+        promoted = False
+        previous_dist = None
         try:
             with zipfile.ZipFile(temporary, 'w', zipfile.ZIP_DEFLATED) as z:
                 for file in sorted(built_dist.rglob('*')):
@@ -426,13 +458,25 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
                 package = json.loads(verified.read(PACKAGE_PREFIX + '/package_info.json'))
                 if package != identity or PACKAGE_PREFIX + '/' + ENTRY_EXECUTABLE not in verified.namelist():
                     raise RuntimeError('Release package identity mismatch')
-            # The archive is complete. Only now touch the prior distribution.
+            # Compute the archive checksum before touching any published files.
+            archive_digest = hashlib.sha256(temporary.read_bytes()).hexdigest()
             if built_dist != DIST:
                 stage = 'promote'
-                promote_verified_directory(built_dist, DIST, AUDIT)
+                previous_dist = promote_verified_directory(built_dist, DIST, AUDIT)
+                promoted = True
                 summary['stages']['promote'] = 'PASS (previous dist replaced after runtime verification)'
             stage = 'archive'
-            temporary.replace(archive)
+            try:
+                temporary.replace(archive)
+            except Exception:
+                if promoted:
+                    try:
+                        restore_promoted_directory(DIST, built_dist, previous_dist)
+                        summary['stages']['promote'] = 'ROLLED_BACK (archive promotion failed)'
+                    except Exception:
+                        summary['stages']['promote'] = 'ROLLBACK_FAILED (see traceback)'
+                        raise
+                raise
         finally:
             temporary.unlink(missing_ok=True)
         summary['stages']['archive'] = 'PASS'
@@ -444,7 +488,7 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
             windows_visual_validation='PENDING',
             update_notice_integration='NOT_APPLICABLE (product has no update or notice feature)',
             release=str(archive),
-            release_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+            release_sha256=archive_digest,
             executable_sha256=executable_hash,
             source_audit=source['validation'],
         )
@@ -453,7 +497,7 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
         summary['failed_stage'] = stage
         summary['error'] = traceback.format_exc()
         log_names = {'dependencies': '01_dependencies.log', 'build': '02_pyinstaller.log',
-                     'windows_runtime': '03_runtime.log'}
+                     'windows_runtime': '03_runtime.log', 'signing': '04_signing.log'}
         if stage in log_names:
             log_path = AUDIT / log_names[stage]
             if log_path.is_file():

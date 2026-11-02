@@ -1,45 +1,52 @@
 @echo off
 chcp 65001 >nul
-setlocal
+setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
-rem Prefer the project's documented Python 3.12 when available. No venv created.
+if errorlevel 1 goto directory_error
+
+rem Windows 10/11 x64, Python 3.12 x64; no venv or global pip changes.
 where py >nul 2>nul
-if not errorlevel 1 (
-    py -3.12 -c "import sys; assert sys.maxsize > 2**32" >nul 2>nul
-    if not errorlevel 1 (
-        py -3.12 -u build_windows.py --profile RELEASE_MIN
-        goto check_result
-    )
-)
+if errorlevel 1 goto try_python
+py -3.12 -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) and sys.maxsize > 2**32 else 1)" >nul 2>nul
+if errorlevel 1 goto try_python
+py -3.12 -u build_windows.py --profile RELEASE_MIN
+goto check_result
+
+:try_python
 where python >nul 2>nul
-if not errorlevel 1 (
-    python -u build_windows.py --profile RELEASE_MIN
-    goto check_result
-)
-where py >nul 2>nul
-if not errorlevel 1 (
-    py -3 -u build_windows.py --profile RELEASE_MIN
-    goto check_result
-)
-echo [오류] 시스템에서 Python을 찾을 수 없습니다. 64비트 Python(PATH 추가)을 설치하세요.
-pause
-exit /b 1
+if errorlevel 1 goto no_python
+python -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) and sys.maxsize > 2**32 else 1)" >nul 2>nul
+if errorlevel 1 goto no_python
+python -u build_windows.py --profile RELEASE_MIN
+goto check_result
 
 :check_result
 if errorlevel 1 goto failed
 echo.
-echo [완료] Sunrise Group 서명 적용 빌드가 완료되었습니다!
-echo - 실행 파일: dist\SunriseImage\SunriseImage.exe
-echo - 배포 압축본: release\Sunrise_Image.zip
+echo [PASS] Sunrise Group signed build pipeline completed.
+echo [EXE] dist\SunriseImage\SunriseImage.exe
+echo [ZIP] release\Sunrise_Image.zip
 pause
-exit /b 0
+endlocal & exit /b 0
+
+:no_python
+echo.
+echo [FAILED] Python 3.12 x64 is required. Install it and enable the py launcher or PATH.
+pause
+endlocal & exit /b 1
+
+:directory_error
+echo [FAILED] Cannot access the build script directory.
+pause
+endlocal & exit /b 1
 
 :failed
 echo.
-echo [실패] 빌드 또는 실행 확인 실패.
-echo - 실패 단계에 따라 의존성 또는 PyInstaller 오류가 위에 표시됩니다.
-echo - 의존성 로그: Windows_결과\01_dependencies.log
-echo - 패키징 로그: Windows_결과\02_pyinstaller.log
-echo - 결과 요약: Windows_결과\WINDOWS_BUILD_RESULT.json
+echo [FAILED] Sunrise Image build pipeline failed.
+echo [RESULT] Windows_결과\WINDOWS_BUILD_RESULT.json
+echo [DEPS] Windows_결과\01_dependencies.log
+echo [BUILD] Windows_결과\02_pyinstaller.log
+echo [RUNTIME] Windows_결과\03_runtime.log
+echo [SIGN] Windows_결과\04_signing.log
 pause
-exit /b 1
+endlocal & exit /b 1

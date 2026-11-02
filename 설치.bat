@@ -1,7 +1,13 @@
 @echo off
 chcp 65001 >nul
-setlocal
+setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
-echo 가상환경(.venv) 생성 없이 바로 EXE_빌드.bat으로 직접 빌드를 시작합니다...
+if errorlevel 1 goto directory_error
+echo [INFO] Starting Sunrise Image direct build without a virtual environment.
 call "%~dp0EXE_빌드.bat"
-exit /b %errorlevel%
+set "run_status=%errorlevel%"
+endlocal & exit /b %run_status%
+:directory_error
+echo [FAILED] Cannot access the build script directory.
+pause
+endlocal & exit /b 1

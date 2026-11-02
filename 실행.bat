@@ -1,25 +1,34 @@
 @echo off
 chcp 65001 >nul
-setlocal
+setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
-if exist "dist\SunriseImage\SunriseImage.exe" (
-    start "" "dist\SunriseImage\SunriseImage.exe"
-    exit /b 0
-)
-where python >nul 2>nul
-if not errorlevel 1 goto run_python
+if errorlevel 1 goto directory_error
+if exist "dist\SunriseImage\SunriseImage.exe" goto run_exe
 where py >nul 2>nul
-if not errorlevel 1 goto run_py
-echo [오류] 실행할 Python 또는 빌드된 SunriseImage.exe가 없습니다. EXE_빌드.bat을 실행하세요.
-pause
-exit /b 1
-
-:run_python
+if errorlevel 1 goto try_python
+py -3.12 -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) and sys.maxsize > 2**32 else 1)" >nul 2>nul
+if errorlevel 1 goto try_python
+py -3.12 app_entry.py
+goto check_result
+:try_python
+where python >nul 2>nul
+if errorlevel 1 goto no_python
+python -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) and sys.maxsize > 2**32 else 1)" >nul 2>nul
+if errorlevel 1 goto no_python
 python app_entry.py
-goto check_python
-:run_py
-py -3 app_entry.py
-:check_python
+goto check_result
+:run_exe
+start "" "dist\SunriseImage\SunriseImage.exe"
+endlocal & exit /b 0
+:check_result
 set "run_status=%errorlevel%"
 if not "%run_status%"=="0" pause
-exit /b %run_status%
+endlocal & exit /b %run_status%
+:no_python
+echo [FAILED] No built EXE and Python 3.12 x64 unavailable.
+pause
+endlocal & exit /b 1
+:directory_error
+echo [FAILED] Cannot access the application directory.
+pause
+endlocal & exit /b 1

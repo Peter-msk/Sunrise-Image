@@ -1,13 +1,13 @@
 @echo off
 chcp 65001 >nul
-setlocal
+setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
-py -3.12 -u build_windows.py --profile RELEASE_MIN
-if errorlevel 1 goto failed
-echo Signed package complete. Review Windows_결과\WINDOWS_BUILD_RESULT.json
+if errorlevel 1 goto directory_error
+echo [INFO] Running official RELEASE_MIN pipeline (signature required).
+call "%~dp0EXE_빌드.bat"
+set "run_status=%errorlevel%"
+endlocal & exit /b %run_status%
+:directory_error
+echo [FAILED] Cannot access the build script directory.
 pause
-exit /b 0
-:failed
-echo Release failed. Review Windows_결과\WINDOWS_BUILD_RESULT.json
-pause
-exit /b 1
+endlocal & exit /b 1

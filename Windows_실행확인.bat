@@ -1,19 +1,25 @@
 @echo off
 chcp 65001 >nul
-setlocal
+setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
-if not exist "dist\SunriseImage\SunriseImage.exe" goto missing
+if errorlevel 1 goto directory_error
+if not exist "dist\SunriseImage\SunriseImage.exe" goto no_exe
 if not exist "Windows_결과" mkdir "Windows_결과"
+if errorlevel 1 goto directory_error
 start /wait "" "dist\SunriseImage\SunriseImage.exe" --smoke-test --report "%~dp0Windows_결과\WINDOWS_RUNTIME_CHECK.json"
 if errorlevel 1 goto failed
-echo 실행 확인 완료. Windows_결과 폴더에 JSON과 화면 캡처가 저장되었습니다.
+echo [PASS] Runtime smoke test. Check Windows_결과\WINDOWS_RUNTIME_CHECK.json.
 start "" "dist\SunriseImage\SunriseImage.exe"
-exit /b 0
-:missing
-echo EXE_빌드.bat으로 빌드한 뒤 실행하세요.
+endlocal & exit /b 0
+:no_exe
+echo [FAILED] Missing EXE; use EXE_빌드.bat first.
 pause
-exit /b 1
+endlocal & exit /b 1
+:directory_error
+echo [FAILED] Cannot access runtime folder.
+pause
+endlocal & exit /b 1
 :failed
-echo 실행 확인 실패. Windows_결과 폴더의 JSON을 확인하세요.
+echo [FAILED] Windows runtime smoke test failed.
 pause
-exit /b 1
+endlocal & exit /b 1

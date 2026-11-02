@@ -42,3 +42,7 @@ Copyright © 2026 Sunrise Group. All rights reserved.
 Windows x64 / Python 3.12에서 `EXE_빌드.bat`을 직접 실행합니다. `.venv`는 생성하지 않습니다. 기존 Python에 필요한 의존성이 정확히 설치되어 있으면 재사용하고, PySide6/Qt 버전 충돌이나 의존성 누락 시 `Windows_결과/private_build_packages`에 프로젝트 전용 패키지를 설치하여 시스템/user site-packages와 분리한 채 PyInstaller를 실행합니다. 기존 전역 Python 패키지는 설치·삭제·업그레이드하지 않습니다.
 
 실패 단계는 `Windows_결과/WINDOWS_BUILD_RESULT.json`으로 확인합니다. 의존성 문제는 `01_dependencies.log`, PyInstaller는 `02_pyinstaller.log`, 실행 확인은 `03_runtime.log`, 공식 그룹서명은 `04_signing.log`에 구분해 기록합니다. 본 저장소의 검증은 소스 단위검사이며, Windows 실빌드·서명 완료를 의미하지 않습니다.
+
+### Windows 배치파일 호환성
+
+공식 소스의 `*.bat` 6개는 UTF-8(BOM 없음) + Windows CRLF 줄바꿈을 사용하며, 시작 시 코드페이지 65001을 지정합니다. LF 전용 배치파일과 혼용하지 마세요. `EXE_빌드.bat`은 Python 3.12 x64를 확인하고 오류코드를 반환합니다. 배포 ZIP 교체 실패 시 이전 `dist` 폴더를 복원하도록 소스 파이프라인을 보완했습니다. 실제 Windows `cmd.exe`, PyInstaller, 서명 및 GUI 확인은 별도 검증이 필요합니다.

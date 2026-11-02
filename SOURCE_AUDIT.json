@@ -6,24 +6,26 @@
   "qualification": "SOURCE_VALIDATED",
   "parent_source_sha256": "fd33daab662b9f98475711dc9735de3f3b19c4a884bc6872e1918a058f8c989a",
   "validation": {
-    "source_checks": "PASS (targeted build/package 17; group-path boundary checks reused)",
+    "source_checks": "PASS (Windows batch, dependency, package, sign gate targeted; Windows runtime PENDING)",
     "windows_native_verified": false,
     "actual_authenticode_verified": false,
     "group_path_policy": "SOURCE_IMPLEMENTED_WINDOWS_PENDING",
-    "dependency_isolation": "SOURCE_IMPLEMENTED; WINDOWS_PIP_PYINSTALLER_PENDING"
+    "dependency_isolation": "SOURCE_IMPLEMENTED; WINDOWS_PIP_PYINSTALLER_PENDING",
+    "windows_batch_format": "SOURCE_PASS (6/6 UTF8 BOMless CRLF; actual cmd.exe pending)",
+    "release_rollback": "SOURCE_PASS (archive replacement rollback targeted)"
   },
   "sha256": {
     ".gitattributes": "2fbfca658da0c09bebeff38d1baf8a3fcc82e193076e0e6e2f7a2d5cb750943d",
     ".gitignore": "e9da83dcf6c59cbd8f6533e58c53919cec905da9e0645c82b71a7b0e48e0765f",
-    "EXE_빌드.bat": "96f74b7355bd7229dfee7d804902322c491cb3300ba08d1915f73db32ad5ee09",
+    "EXE_빌드.bat": "d17d51be71b97b39a09548930dd5084100d18ba0cb93436fae4e7b3b46fd81c9",
     "THIRD_PARTY_NOTICES.md": "112d5799d35e3d978bfc74f18409d625ad614701daa40723a77ad52091eb150d",
-    "Windows_실행확인.bat": "613e43e855686e1b07e7befe4ca571dbcac3b0d42af59d2905a0bf10c34e1dd0",
+    "Windows_실행확인.bat": "55e4ad9a54b845e5b8a9478a6ca7b6c13337f0774c37d6f6f72332bf9c40574b",
     "app_entry.py": "02820e36eaf83bc9183581d83e800617e7edad228b03c0e5687cd2c18c3e36d1",
     "assets/check.svg": "489ab73d94ebb0100b0f316614ff7749a2dcf4c99c8f0cf41406299c5a697f88",
     "assets/chevron_down.svg": "04164bd281c5446f2bf1504251686e27e280b93d7e5d24f781acede7439826e5",
     "assets/chevron_up.svg": "80104e0a5acc946d830462dfaea9d565e31fab1a0cd9819efe0d98842db59497",
     "assets/sunrise_image.ico": "aba5fb494405a878267fb70b7351b1378a9185001619ab174a5fb6e45811e895",
-    "build_windows.py": "60fab4f1c2b0d04f9e9d862fce5156ba451c58d35a21109668e9ccb2dbfa6b87",
+    "build_windows.py": "3d36df94a1ed3e86c14dcdf0fb43a3cbedc0ebc57f74cc33565758697d6d314f",
     "diagnostics.py": "b006b5b8c0e199c80752d82969b719d35d151b126f76dadc6f0f9ac9a606ece9",
     "document_optimizer.py": "670673ff7d30e01798a6f3d854076a138587048fbeb54b1c5f1cbd21c8ca16ad",
     "document_reader.py": "d1ecde6fdcde6ae5ef3981bb6948aa06366f9a65ebba210908bc633c17a3a0fe",
@@ -39,9 +41,9 @@
     "ui_preview_dialog.py": "32ce3d68b8b4c0ffbd88e288ed768da2ff6055413ac5fc396f6c72ad7cb0a9da",
     "ui_theme.py": "4495423fd21adfc87c718da9f9ba787ded38444f18f069bb245e8ef21a99990f",
     "ui_widgets.py": "55650ca3f0b7dcb5a09d946377b4bc1e1ae18c8e961916e9ebf8f14152482efd",
-    "공식_릴리즈.bat": "bcfd62c461869bd6b89b409f4a21cd7c82e1357878afe346bff692f517c64564",
-    "배포_마무리.bat": "4b3f6efceab6229f8b5fc0ae57e75c3e144a16d621b5c5b40d9520a4fece45c3",
-    "설치.bat": "7904288fc3109c903c62af172dc7720e6973d1100168a0db5c0d9b6ee91deb83",
-    "실행.bat": "725e41f0cd2b27c3cae2d6d2f457297938db41d0567508e771cf5a597228bad0"
+    "공식_릴리즈.bat": "ae35616e5fe5efa1fdc4dcccd21578880efcc8c2ccac92ccaef4a15af7193c0a",
+    "배포_마무리.bat": "69649efeb6f85c7487b2bc77dc45792d29d2e34a67e2a5ccc7261d4d9c84def8",
+    "설치.bat": "6ce0cc90b05299e7198856acba38c9f4c43c94cf825d7805faec4387a24ba412",
+    "실행.bat": "51dc7fc0632d04320a8ee8db8863df3f63312f7128f7d0868eee6c7e2c128733"
   }
 }
