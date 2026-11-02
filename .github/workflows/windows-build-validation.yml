@@ -31,6 +31,8 @@ jobs:
           Get-Command certreq.exe,certutil.exe | Format-Table Name,Source
       - name: Seed two old Sunrise Group certificates to exercise duplicate-subject safety
         shell: pwsh
+        env:
+          PYTHONUTF8: '1'
         run: |
           $ErrorActionPreference = 'Stop'
           python -c "from pathlib import Path;import json;import capture_signing as c;p=Path.cwd(); a=p/'Windows_결과';a.mkdir(exist_ok=True); prior=[c._create_certificate(c._find_program('certreq.exe'),c._find_program('certutil.exe'),a,p)[1] for _ in range(2)];(a/'CI_PRIOR_CERTIFICATES.json').write_text(json.dumps(prior));print('Seeded old certificate count:',len(prior))"
