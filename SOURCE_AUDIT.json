@@ -6,16 +6,16 @@
   "qualification": "SOURCE_VALIDATED",
   "parent_source_sha256": "fd33daab662b9f98475711dc9735de3f3b19c4a884bc6872e1918a058f8c989a",
   "validation": {
-    "source_checks": "PASS (14 build/package tests; non-GUI group boundary tests PASS)",
+    "source_checks": "PASS (targeted build/package 17; group-path boundary checks reused)",
     "windows_native_verified": false,
     "actual_authenticode_verified": false,
     "group_path_policy": "SOURCE_IMPLEMENTED_WINDOWS_PENDING",
-    "gui_tests": "PENDING (PySide6 unavailable in current environment)"
+    "dependency_isolation": "SOURCE_IMPLEMENTED; WINDOWS_PIP_PYINSTALLER_PENDING"
   },
   "sha256": {
     ".gitattributes": "2fbfca658da0c09bebeff38d1baf8a3fcc82e193076e0e6e2f7a2d5cb750943d",
     ".gitignore": "e9da83dcf6c59cbd8f6533e58c53919cec905da9e0645c82b71a7b0e48e0765f",
-    "EXE_빌드.bat": "ec70ce601dcdee4afdaeb6eddbeb3593c75265ee755ef6c438e4800f1107fa5d",
+    "EXE_빌드.bat": "96f74b7355bd7229dfee7d804902322c491cb3300ba08d1915f73db32ad5ee09",
     "THIRD_PARTY_NOTICES.md": "112d5799d35e3d978bfc74f18409d625ad614701daa40723a77ad52091eb150d",
     "Windows_실행확인.bat": "613e43e855686e1b07e7befe4ca571dbcac3b0d42af59d2905a0bf10c34e1dd0",
     "app_entry.py": "02820e36eaf83bc9183581d83e800617e7edad228b03c0e5687cd2c18c3e36d1",
@@ -23,7 +23,7 @@
     "assets/chevron_down.svg": "04164bd281c5446f2bf1504251686e27e280b93d7e5d24f781acede7439826e5",
     "assets/chevron_up.svg": "80104e0a5acc946d830462dfaea9d565e31fab1a0cd9819efe0d98842db59497",
     "assets/sunrise_image.ico": "aba5fb494405a878267fb70b7351b1378a9185001619ab174a5fb6e45811e895",
-    "build_windows.py": "feab7d978d989273cc5d3409fe6ea72f72f4653b94ec62330cd03515b048cf18",
+    "build_windows.py": "60fab4f1c2b0d04f9e9d862fce5156ba451c58d35a21109668e9ccb2dbfa6b87",
     "diagnostics.py": "b006b5b8c0e199c80752d82969b719d35d151b126f76dadc6f0f9ac9a606ece9",
     "document_optimizer.py": "670673ff7d30e01798a6f3d854076a138587048fbeb54b1c5f1cbd21c8ca16ad",
     "document_reader.py": "d1ecde6fdcde6ae5ef3981bb6948aa06366f9a65ebba210908bc633c17a3a0fe",
