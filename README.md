@@ -76,7 +76,7 @@ Copyright © 2026 Sunrise Group. All rights reserved.
 
 ## 코드서명 — 매 빌드 신규 생성 (사용자 확정 정책)
 
-`EXE_빌드.bat`의 `RELEASE_MIN`은 기존 `CN=Sunrise Group` 인증서를 **검색·재사용·선택하지 않습니다.** 서명을 수행할 때마다 Windows `certreq.exe`로 새 RSA 3072/SHA-256 코드서명 인증서를 만들고 `certutil.exe`로 CurrentUser\My에 등록합니다. 방금 생성된 공개 `.cer` 파일의 DER SHA-1 지문을 Python 표준 라이브러리로 계산하여 `signtool.exe sign /sha1`에 직접 전달합니다. 동명이인 인증서가 여러 개 있어도 기존 인증서를 조회하지 않습니다.
+`EXE_빌드.bat`의 `RELEASE_MIN`은 기존 `CN=Sunrise Group` 인증서를 **검색·재사용·선택하지 않습니다.** 서명을 수행할 때마다 Windows `certreq.exe`로 새 RSA 3072/SHA-256 코드서명 인증서를 만들고 `certutil.exe`로 CurrentUser\My에 등록합니다. 방금 생성된 `.cer` 파일에 대한 `certutil` 등록 응답의 SHA-1 지문을 우선 사용하고, 표준 DER/PEM 형식일 경우 파일에서도 지문을 계산하여 `signtool.exe sign /sha1`에 직접 전달합니다. 동명이인 인증서가 여러 개 있어도 기존 인증서를 조회하지 않습니다.
 
 기존 인증서는 그대로 보존합니다. 개인키는 내보내지 않고 기존 인증서 저장소·Trusted Root·전역 Python·PowerShell 실행 정책은 변경하지 않습니다. `SUNRISE_TIMESTAMP_URL`은 선택사항입니다. `WINDOWS_SIGNING_RESULT.json`에 `certificate_created=true`, `certificate_selection_policy=ALWAYS_NEW_PER_SIGNING`, 서명에 사용한 신규 지문과 EXE SHA256을 기록합니다. 이전 버전의 `SUNRISE_SIGNING_IDENTITY.json`과 `SUNRISE_SIGNING_THUMBPRINT` 설정은 새 서명 과정에서 사용하지 않습니다.
 

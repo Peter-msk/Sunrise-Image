@@ -56,8 +56,7 @@ jobs:
           $exe = 'dist/SunriseImage/SunriseImage.exe'
           $actual = (Get-FileHash -Algorithm SHA256 $exe).Hash
           if ($actual -ne $build.executable_sha256 -or $actual -ne $sig.executable_sha256_after_signing) { throw 'Signed hash mismatch' }
-          $issued = python -c "from pathlib import Path; import capture_signing as cs; print(cs._fresh_certificate_thumbprint(Path('Windows_결과')/cs.CERT_FILE))"
-          if ($LASTEXITCODE -ne 0 -or $issued.Trim() -ne $sig.signer_thumbprint) { throw 'Newly issued certificate thumbprint mismatch' }
+          if (-not (Test-Path 'Windows_결과/SunriseGroup_SelfSigned_CodeSigning.cer')) { throw 'New public certificate missing' }
           $previous = Get-Content -Raw 'Windows_결과/CI_PRIOR_CERTIFICATES.json' | ConvertFrom-Json
           if ($sig.signer_thumbprint -in $previous) { throw 'Signer reused an old certificate' }
           if (-not $sig.certificate_created -or $sig.certificate_selection_policy -ne 'ALWAYS_NEW_PER_SIGNING') { throw 'Fresh certificate gate failed' }

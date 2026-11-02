@@ -44,22 +44,40 @@ def _run(argv, cwd):
     return out
 
 
-def _fresh_certificate_thumbprint(certificate: Path) -> str:
-    """Identify ONLY the certificate just issued by certreq, never search My store.
+def _fresh_certificate_thumbprint(certificate: Path, installation_output: str = '') -> str:
+    """Fingerprint the *just created* certificate, never enumerate old certs.
 
-    Authenticode's `/sha1` selector uses the SHA-1 fingerprint of the DER
-    public certificate. This is an identifier; the file signature still uses
-    SHA-256. Support DER and PEM output without localized certutil parsing.
+    Windows certreq may emit DER, PEM, UTF-16 PEM or other certificate
+    containers. For non-DER containers use the certutil **registration output
+    for this exact new file** (not `certutil -store` / subject search).
     """
+    # Registration output from certutil -addstore is tied to THIS certificate
+    # file, not a subject/store enumeration. Prefer its canonical X.509 SHA1.
+    values = []
+    for line in installation_output.splitlines():
+        match = re.search(r'(?i)^\s*(?:Cert Hash\s*\(sha1\)|Thumbprint)\s*:\s*([0-9a-f]{40})\s*$', line)
+        if match:
+            values.append(match.group(1).upper())
+    distinct = list(dict.fromkeys(values))
+    if len(distinct) == 1:
+        return distinct[0]
+    if len(distinct) > 1:
+        raise RuntimeError('Ambiguous thumbprints in freshly issued certificate registration output')
     raw = certificate.read_bytes()
-    if raw.lstrip().startswith(b'-----BEGIN CERTIFICATE-----'):
-        try:
-            raw = ssl.PEM_cert_to_DER_cert(raw.decode('ascii'))
-        except (UnicodeError, ValueError) as exc:
-            raise RuntimeError('New certreq certificate has malformed PEM encoding') from exc
-    if len(raw) < 128 or raw[0] != 0x30:
-        raise RuntimeError('New certreq certificate is not a valid-looking DER X.509 certificate')
-    return hashlib.sha1(raw).hexdigest().upper()
+    der = raw
+    if raw[:1] != b'\x30':
+        der = None
+        for encoding in ('utf-8-sig', 'utf-16', 'utf-16-le', 'utf-16-be'):
+            try:
+                text = raw.decode(encoding)
+                if '-----BEGIN CERTIFICATE-----' in text:
+                    der = ssl.PEM_cert_to_DER_cert(text)
+                    break
+            except (UnicodeError, ValueError):
+                continue
+    if der is not None and len(der) >= 128 and der[:1] == b'\x30':
+        return hashlib.sha1(der).hexdigest().upper()
+    raise RuntimeError('Cannot obtain the newly issued certificate thumbprint from certutil registration or DER/PEM; public certificate prefix=' + raw[:20].hex())
 
 
 def _create_certificate(certreq, certutil, audit, root):
@@ -83,8 +101,8 @@ def _create_certificate(certreq, certutil, audit, root):
     _run([certreq,'-q','-new',inf,cert],root)
     if not cert.is_file():
         raise RuntimeError('certreq did not produce a public certificate')
-    issued_thumbprint = _fresh_certificate_thumbprint(cert)
-    _run([certutil,'-user','-f','-addstore','My',cert],root)
+    installation_output = _run([certutil,'-user','-f','-addstore','My',cert],root)
+    issued_thumbprint = _fresh_certificate_thumbprint(cert, installation_output)
     return cert, issued_thumbprint
 
 
