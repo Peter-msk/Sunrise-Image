@@ -36,3 +36,9 @@ Copyright © 2026 Sunrise Group. All rights reserved.
 - 공식 Windows 실행형 배포 ZIP을 압축 해제하면 `Sunrise Group/Sunrise Image/SunriseImage.exe`로 구성됩니다. 사용자가 원하는 부모 폴더에 전체 `Sunrise Group` 폴더를 배치할 수 있습니다.
 - 프로그램 진단 파일은 `%LOCALAPPDATA%/Sunrise Group/Sunrise Image/Diagnostics/`에 기록됩니다. 기존 `%LOCALAPPDATA%/SunriseImage/Diagnostics/` 기록은 자동 삭제하지 않습니다.
 - 기존 실행파일의 저장 위치나 사용자의 문서·프로젝트 파일을 임의 이동하지 않습니다. 업데이트·설치파일을 이 저장소에 포함하지 않습니다.
+
+## EXE 직접 빌드와 PySide6 충돌 처리
+
+Windows x64 / Python 3.12에서 `EXE_빌드.bat`을 직접 실행합니다. `.venv`는 생성하지 않습니다. 기존 Python에 필요한 의존성이 정확히 설치되어 있으면 재사용하고, PySide6/Qt 버전 충돌이나 의존성 누락 시 `Windows_결과/private_build_packages`에 프로젝트 전용 패키지를 설치하여 시스템/user site-packages와 분리한 채 PyInstaller를 실행합니다. 기존 전역 Python 패키지는 설치·삭제·업그레이드하지 않습니다.
+
+실패 단계는 `Windows_결과/WINDOWS_BUILD_RESULT.json`으로 확인합니다. 의존성 문제는 `01_dependencies.log`, PyInstaller는 `02_pyinstaller.log`, 실행 확인은 `03_runtime.log`, 공식 그룹서명은 `04_signing.log`에 구분해 기록합니다. 본 저장소의 검증은 소스 단위검사이며, Windows 실빌드·서명 완료를 의미하지 않습니다.
