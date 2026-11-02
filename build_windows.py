@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parent
 AUDIT = ROOT / 'Windows_결과'
 DIST = ROOT / 'dist' / 'SunriseImage'
 DEFAULT_PROFILE = 'RELEASE_MIN'
+# Every official Sunrise desktop package extracts below one group folder.
+PACKAGE_PREFIX = 'Sunrise Group/Sunrise Image'
 
 
 def check_source_audit():
@@ -333,12 +335,12 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
             with zipfile.ZipFile(temporary, 'w', zipfile.ZIP_DEFLATED) as z:
                 for file in sorted(built_dist.rglob('*')):
                     if file.is_file():
-                        z.write(file, str(file.relative_to(built_dist.parent)))
+                        z.write(file, PACKAGE_PREFIX + '/' + file.relative_to(built_dist).as_posix())
             with zipfile.ZipFile(temporary) as verified:
                 if verified.testzip() is not None:
                     raise RuntimeError('Release ZIP CRC failed')
-                package = json.loads(verified.read('SunriseImage/package_info.json'))
-                if package != identity or 'SunriseImage/' + ENTRY_EXECUTABLE not in verified.namelist():
+                package = json.loads(verified.read(PACKAGE_PREFIX + '/package_info.json'))
+                if package != identity or PACKAGE_PREFIX + '/' + ENTRY_EXECUTABLE not in verified.namelist():
                     raise RuntimeError('Release package identity mismatch')
             # The archive is complete. Only now touch the prior distribution.
             if built_dist != DIST:

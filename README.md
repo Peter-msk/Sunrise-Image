@@ -30,3 +30,9 @@ HWPX, PDF 및 Office 문서에 포함된 이미지를 선택해 추출·변환�
 ---
 
 Copyright © 2026 Sunrise Group. All rights reserved.
+
+## Sunrise Group 공통 폴더
+
+- 공식 Windows 실행형 배포 ZIP을 압축 해제하면 `Sunrise Group/Sunrise Image/SunriseImage.exe`로 구성됩니다. 사용자가 원하는 부모 폴더에 전체 `Sunrise Group` 폴더를 배치할 수 있습니다.
+- 프로그램 진단 파일은 `%LOCALAPPDATA%/Sunrise Group/Sunrise Image/Diagnostics/`에 기록됩니다. 기존 `%LOCALAPPDATA%/SunriseImage/Diagnostics/` 기록은 자동 삭제하지 않습니다.
+- 기존 실행파일의 저장 위치나 사용자의 문서·프로젝트 파일을 임의 이동하지 않습니다. 업데이트·설치파일을 이 저장소에 포함하지 않습니다.

@@ -9,7 +9,7 @@ def main():
         from hwpx_image_extractor import main as start
         start()
     except Exception:
-        folder=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'SunriseImage'/'Diagnostics'
+        folder=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'Sunrise Group'/'Sunrise Image'/'Diagnostics'
         folder.mkdir(parents=True,exist_ok=True);path=folder/'startup_error.log'
         path.write_text(traceback.format_exc(),encoding='utf-8')
         message='프로그램 시작 중 오류가 발생했습니다.\n오류 기록: '+str(path)

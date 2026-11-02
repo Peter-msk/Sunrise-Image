@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def diagnostics_folder():
-    return Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'SunriseImage' / 'Diagnostics'
+    return Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'Sunrise Group' / 'Sunrise Image' / 'Diagnostics'
 
 
 def configure_logging():

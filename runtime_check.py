@@ -48,7 +48,7 @@ def run(report_path=None):
     from document_reader import scan_document,open_document
     from document_optimizer import optimize_document
     from image_engine import Settings,convert_image,FORMATS
-    path=Path(report_path) if report_path else Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'SunriseImage'/'Diagnostics'/'runtime_check.json'
+    path=Path(report_path) if report_path else Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'Sunrise Group'/'Sunrise Image'/'Diagnostics'/'runtime_check.json'
     path.parent.mkdir(parents=True,exist_ok=True)
     report={'program':'Sunrise Image','platform':platform.system(),'windows_verified':platform.system()=='Windows',
             'python':platform.python_version(),'architecture':platform.machine(),'frozen':bool(getattr(sys,'frozen',False)),
