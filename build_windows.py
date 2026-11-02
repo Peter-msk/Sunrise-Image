@@ -58,12 +58,10 @@ def _failure_hint(log_name: str, details: str) -> str:
                     'If enterprise policy restricts scripts, contact the policy administrator. '
                     'Do not modify persistent execution policies.')
         if 'certificate' in lower or 'cert:' in lower:
-            return ('A valid CN=Sunrise Group code-signing certificate with a private key '
-                    'is required in CurrentUser\\My. No unsigned official release is permitted.')
+            return 'Windows CurrentUser certificate creation/reuse or signing failed; see 04_signing.log.'
         if 'timestamp' in lower or 'https://' in lower:
-            return ('Check the approved SUNRISE_TIMESTAMP_URL (HTTPS), network access '
-                    'and a trusted timestamp result. The build must not skip timestamp verification.')
-        return 'Inspect signing log; official releases require both Authenticode and timestamp checks.'
+            return 'Optional timestamp was configured and failed; check SUNRISE_TIMESTAMP_URL or omit it for Capture-style signing.'
+        return 'Inspect signing log; a matching Authenticode signer is required; timestamp is optional for local self-signing.'
     if log_name != '02_pyinstaller.log':
         return '실제 오류는 해당 단계 로그의 마지막 ERROR/Traceback을 확인하세요.'
     if 'multiple qt bindings' in lower or 'more than one qt' in lower:
@@ -104,49 +102,48 @@ def command(args, log_name, env=None):
 
 
 def check_signing_prerequisites():
-    """Fail before expensive PyInstaller work when official signing is impossible.
+    """Capture-style signing: no timestamp URL or pre-installed cert required.
 
-    This checks certificate availability and an HTTPS timestamp setting with a fixed
-    PowerShell inline command; it NEVER changes local/user/machine execution policy.
-    The later script invocation is isolated to a single child PowerShell process.
+    Windows built-in code signing tools will provision a non-exportable cert only
+    if the current user has no usable Sunrise Group code-signing certificate.
+    No trust-root, execution policy or other applications are modified.
     """
-    from urllib.parse import urlsplit
-    timestamp = os.environ.get('SUNRISE_TIMESTAMP_URL', '').strip()
-    try:
-        parsed = urlsplit(timestamp)
-    except ValueError as exc:
-        raise RuntimeError('Invalid SUNRISE_TIMESTAMP_URL; approved HTTPS timestamp service is required.') from exc
-    if parsed.scheme != 'https' or not parsed.netloc or parsed.username or parsed.password:
-        raise RuntimeError('Set SUNRISE_TIMESTAMP_URL to the approved HTTPS timestamp service before RELEASE_MIN.')
-    preflight = (
+    test = (
         "$ErrorActionPreference='Stop'; "
-        "$cert=Get-ChildItem Cert:\\CurrentUser\\My -CodeSigningCert | "
-        "Where-Object { $_.Subject -eq 'CN=Sunrise Group' -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date) } | "
-        "Select-Object -First 1; "
-        "if (-not $cert) { throw 'Valid Sunrise Group code signing certificate with private key is missing.' }; "
-        "$mp=Get-ExecutionPolicy -Scope MachinePolicy; $up=Get-ExecutionPolicy -Scope UserPolicy; "
-        "if ($mp -in @('AllSigned','Restricted') -or $up -in @('AllSigned','Restricted')) { "
-        "throw 'Enforced Group Policy requires an authorized signed script; process override is not permitted.' }; "
-        "Write-Output 'Sunrise Group signing preflight: certificate and timestamp configuration OK.'"
+        "Get-Command New-SelfSignedCertificate,Set-AuthenticodeSignature,Get-AuthenticodeSignature,Export-Certificate "
+        "-ErrorAction Stop | Out-Null; "
+        "$null=Get-Item 'Cert:\\CurrentUser\\My' -ErrorAction Stop; "
+        "Write-Output 'PASS: Windows Capture-style signing tools ready; certificate may be auto-created.'"
     )
+    # PowerShell -Command does not load a .ps1 file; no OS-wide policy edits.
     command(['powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive',
-             '-Command', preflight], '00_signing_preflight.log')
+             '-Command', test], '00_signing_preflight.log')
 
 
 def sign_executable(executable: Path):
-    """Run the SHA-audited signer with a per-process execution policy only.
-
-    This does NOT use Set-ExecutionPolicy and does NOT override Group Policy.
-    No fallback to unsigned output or signature verification bypass is allowed.
-    """
+    """SHA-audited signer, per-process PowerShell only, verified report required."""
     script = ROOT / 'sign_release.ps1'
     audit = json.loads((ROOT / 'SOURCE_AUDIT.json').read_text(encoding='utf-8'))
     pinned = audit.get('sha256', {}).get('sign_release.ps1')
     if not pinned or not script.is_file() or hashlib.sha256(script.read_bytes()).hexdigest() != pinned:
         raise RuntimeError('Signing script missing or SHA256 differs from SOURCE_AUDIT.json; refusing to sign.')
+    output = AUDIT / 'WINDOWS_SIGNING_RESULT.json'
+    output.unlink(missing_ok=True)
     command(['powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive',
              '-ExecutionPolicy', 'Bypass', '-File', str(script),
-             '-Executable', str(executable)], '04_signing.log')
+             '-Executable', str(executable), '-ReportPath', str(output)], '04_signing.log')
+    if not output.is_file():
+        raise RuntimeError('Signer reported success but did not create WINDOWS_SIGNING_RESULT.json.')
+    signed = json.loads(output.read_text(encoding='utf-8-sig'))
+    required = ('CAPTURE_STYLE_SELF_SIGNED_AUTHENTICODE', 'CN=Sunrise Group', 'Authenticode')
+    if (signed.get('signing_mode') != required[0]
+            or signed.get('signer_subject') != required[1]
+            or signed.get('signature_type') != required[2]
+            or signed.get('windows_signature_status') not in ('Valid','NotTrusted','UnknownError')
+            or not signed.get('signer_thumbprint')
+            or signed.get('executable_sha256_after_signing') != hashlib.sha256(executable.read_bytes()).hexdigest()):
+        raise RuntimeError('Signed executable identity or signature report validation failed.')
+    return signed
 
 
 def _requirements():
@@ -492,9 +489,21 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
         summary['stages']['licenses'] = 'PASS'
         stage = 'signing'
         if profile == 'RELEASE_MIN':
-            sign_executable(exe)
+            signing = sign_executable(exe)
             executable_hash = hashlib.sha256(exe.read_bytes()).hexdigest()
-            summary['stages']['signing'] = 'PASS'
+            summary['stages']['signing'] = 'PASS (self-signed Authenticode)'
+            summary['signing_mode'] = signing['signing_mode']
+            summary['signing_thumbprint'] = signing['signer_thumbprint']
+            summary['signing_windows_trust'] = signing['windows_signature_status']
+            summary['signing_timestamped'] = signing['timestamped']
+            identity['signing_mode'] = signing['signing_mode']
+            identity['signer_thumbprint'] = signing['signer_thumbprint']
+            identity['timestamped'] = signing['timestamped']
+            # Like Capture, export only the public .cer; never a private key or PFX.
+            public_cert = AUDIT / 'SunriseGroup_SelfSigned_CodeSigning.cer'
+            if public_cert.is_file():
+                (built_dist / 'signing').mkdir(exist_ok=True)
+                shutil.copy2(public_cert, built_dist / 'signing' / public_cert.name)
         else:
             summary['stages']['signing'] = 'PENDING (development build)'
         identity['executable_sha256'] = executable_hash
@@ -545,9 +554,11 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
         summary['stages']['archive'] = 'PASS'
         summary.update(
             status='PASS',
-            qualification='PACKAGE_VALIDATED' if not package_only else 'PACKAGE_VALIDATED_SOURCE_BINDING_LIMITED',
+            qualification=('SELF_SIGNED_PACKAGE_VALIDATED_NOT_PUBLICLY_TRUSTED' if profile == 'RELEASE_MIN'
+                           else 'DEVELOPMENT_PACKAGE_VALIDATED') if not package_only else 'PACKAGE_VALIDATED_SOURCE_BINDING_LIMITED',
             official_release=False,
             signed_release_candidate=profile == 'RELEASE_MIN',
+            certificate_trust='SELF_SIGNED_NOT_PUBLICLY_TRUSTED' if profile == 'RELEASE_MIN' else 'UNSIGNED',
             windows_visual_validation='PENDING',
             update_notice_integration='NOT_APPLICABLE (product has no update or notice feature)',
             release=str(archive),

@@ -1,52 +1,85 @@
 # Sunrise Image
 
-Sunrise Group의 문서 내 이미지 추출·변환·경량화 프로그램입니다.
-
-## 프로그램 목적
-
-HWPX, PDF 및 Office 문서에 포함된 이미지를 선택해 추출·변환하거나 문서에 포함된 이미지를 최적화하여, 원본을 보존하면서 재사용 가능한 이미지와 경량화 문서 사본을 생성합니다.
-
-## 지원 운영체제
-
-- Windows 10 / Windows 11 (64비트, x64)
-
-## 개발언어 및 주요 기술
-
-- **개발언어:** Python 3.12
-- **주요 기술:** PySide6(Qt), Pillow, PyMuPDF, defusedxml
-- **배포 형태:** Windows 폴더형 실행 패키지(onedir)
+Sunrise Image는 한글 HWPX, PDF, Word, Excel, PowerPoint 문서에 포함된 이미지를 확인·선별·추출하고, 품질과 크기를 조정해 문서 경량화 사본을 만드는 Sunrise Group의 Windows 업무 도구입니다.
 
 ## 주요 기능
 
-- HWPX, DOCX, XLSX, PPTX, PDF 문서의 이미지 확인·추출
-- 파일·폴더 일괄 등록과 드래그 앤 드롭
-- 이미지 형식·용량 필터 및 개별 항목 선택
-- JPG, PNG, WebP, TIFF 등 이미지 형식 변환
-- 해상도, DPI, 압축 품질, 목표 용량, 회전 및 파일명 설정
-- HWPX 본문 이미지 자르기 정보 반영
-- 이미지 미리보기, 원본·결과 비교 및 문서 내 이미지 최적화
-- 원본 보존형 문서 경량화 사본 생성과 진행상태·취소 지원
+- 파일·폴더 추가와 드래그 앤 드롭을 통한 문서 일괄 등록
+- 이미지 형식·용량 필터와 개별 체크 선택
+- 원본 형식 추출 및 JPG·PNG·WebP·TIFF 등 이미지 변환
+- 해상도·DPI·품질·목표 용량·회전·파일명 설정
+- HWPX 본문 자르기 영역을 반영한 추출
+- 이미지 목록·확대/축소·원본과 결과 비교 미리보기
+- 선택한 이미지의 문서 내 변환과 경량화 사본 생성
+- 진행률·중지·결과 폴더 확인 및 라이트/다크 테마
+
+## 지원 형식
+
+| 문서 | 이미지 추출 | 문서 경량화 |
+|---|---|---|
+| HWPX | 지원, 본문 자르기 선택 가능 | 지원 |
+| Word DOCX | 지원 | 지원 |
+| Excel XLSX | 지원 | 지원 |
+| PowerPoint PPTX | 지원 | 지원 |
+| PDF | 내장·인라인 이미지 추출 | XObject 이미지 교체 지원, 인라인 이미지 교체 제외 |
+
+구형 바이너리 HWP·DOC·XLS·PPT는 지원하지 않습니다. 해당 문서 작성 프로그램에서 지원되는 최신 형식으로 저장한 뒤 사용하세요. 이 제품은 자동 업데이트와 공지사항 조회 기능을 제공하지 않습니다.
+
+## 실행 조건
+
+| 항목 | 조건 |
+|---|---|
+| 운영체제 | Windows 10/11 x64 |
+| 소스 실행·빌드 | Python 3.12 x64 |
+| 주요 라이브러리 | PySide6-Essentials, shiboken6, Pillow, PyMuPDF, defusedxml |
+| HWPX 추출 | 한컴 자동화 없이 처리 |
+| 배포 형태 | SunriseImage.exe와 종속 파일을 포함하는 폴더형 실행 패키지 |
+
+라이브러리 설치 버전은 `requirements.txt`와 `requirements-build.txt`에 고정되어 있습니다.
+
+## 실행과 사용
+
+완성된 실행 패키지를 받았다면 폴더 전체를 압축 해제하고 `SunriseImage.exe`를 실행합니다. 소스에서 실행하려면 저장소 폴더에서 다음을 실행하세요.
+
+```powershell
+python -m pip install -r requirements.txt
+python app_entry.py
+```
+
+1. **문서 추가** 또는 **폴더 추가**로 문서를 등록합니다.
+2. 목록과 미리보기에서 필요한 이미지를 선택합니다.
+3. 출력 폴더·저장 형식·해상도·품질·용량 설정을 확인합니다.
+4. **선택 이미지 변환 추출** 또는 **선택 이미지 문서 내 변환**을 실행합니다.
+5. 결과 폴더의 이미지·경량화 사본과 처리 결과를 확인합니다.
+
+원본문서는 보존하고 결과를 별도 사본으로 생성합니다. 업무에 사용할 사본은 원래 문서 작성 프로그램에서 열어 레이아웃과 인쇄 품질을 확인하세요.
+
+## Windows 실행파일 빌드
+
+Windows x64의 Python 3.12 환경에서 `EXE_빌드.bat`을 실행합니다. 생성 위치는 다음과 같습니다.
+
+`.venv`는 만들지 않습니다. PySide6 등의 버전이 일치하면 시스템 Python 패키지를 재사용하고, 충돌하거나 필수 의존성이 부족하면 `Windows_결과/private_build_packages`에 전용 패키지를 준비하여 `python -S -m PyInstaller`로 시스템 Qt를 제외하고 빌드합니다. 공용 패키지는 변경하지 않습니다. 의존성 설치 실패는 `Windows_결과/01_dependencies.log`, PyInstaller 실패는 `02_pyinstaller.log`에서 확인합니다.
+
+- 실행파일: `dist/SunriseImage/SunriseImage.exe`
+- 배포 압축본: `release/Sunrise_Image.zip`
+
+Windows 배치파일 6종은 UTF-8(BOM 없음), CRLF 줄바꿈으로 배포합니다. `EXE_빌드.bat` 실행 시 기존의 `LF`-only 배치 파일을 섞지 마십시오. 빌드 전 소스 감사에서 BOM/CRLF 위반을 차단합니다.
+
+현재 저장소는 최종 소스와 필수 빌드 파일을 제공합니다. 실제 Windows 배포 검증 여부는 빌드 결과로 확인해야 합니다.
+
+## 외부 라이브러리
+
+외부 구성요소의 고지는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 확인하세요. 프로젝트 자체의 별도 사용 허락이 명시되지 않은 상태에서 공개 소스만으로 재배포 권한이 자동 부여되지는 않습니다.
 
 ---
-
 Copyright © 2026 Sunrise Group. All rights reserved.
 
-## Sunrise Group 공통 폴더
+## 코드서명 자동 생성·재사용 — Sunrise Capture 호환 정책
 
-- 공식 Windows 실행형 배포 ZIP을 압축 해제하면 `Sunrise Group/Sunrise Image/SunriseImage.exe`로 구성됩니다. 사용자가 원하는 부모 폴더에 전체 `Sunrise Group` 폴더를 배치할 수 있습니다.
-- 프로그램 진단 파일은 `%LOCALAPPDATA%/Sunrise Group/Sunrise Image/Diagnostics/`에 기록됩니다. 기존 `%LOCALAPPDATA%/SunriseImage/Diagnostics/` 기록은 자동 삭제하지 않습니다.
-- 기존 실행파일의 저장 위치나 사용자의 문서·프로젝트 파일을 임의 이동하지 않습니다. 업데이트·설치파일을 이 저장소에 포함하지 않습니다.
+기본 `EXE_빌드.bat`은 RELEASE_MIN으로 빌드합니다. `SUNRISE_TIMESTAMP_URL` 환경변수나 사전 생성된 인증서가 없어도 진행합니다. Windows 빌드 PC의 CurrentUser\My에서 기존 `CN=Sunrise Group` 코드서명 인증서와 개인키를 재사용하고, 없을 때만 RSA 3072/SHA256, Code Signing EKU, 비내보내기 개인키를 사용해 자체서명 인증서를 생성합니다. 새로 만든 인증서는 이후 빌드에서 재사용합니다.
 
-## EXE 직접 빌드와 PySide6 충돌 처리
+`sign_release.ps1`은 체크포인트 SHA256 확인 후 별도 PowerShell 프로세스에서만 실행합니다. 개인키/PFX를 최종 ZIP에 넣거나 사용자 PC의 Trusted Root 인증서 저장소를 변경하지 않습니다. 공개 `.cer`만 `Windows_결과`와 배포 폴더 내 `signing/`에 제공합니다. `WINDOWS_SIGNING_RESULT.json`에 서명자, 지문, 실제 Windows 서명 상태, 타임스탬프 사용 여부를 기록하고 서명 후 EXE SHA256을 최종 패키지에 반영합니다.
 
-Windows x64 / Python 3.12에서 `EXE_빌드.bat`을 직접 실행합니다. `.venv`는 생성하지 않습니다. 기존 Python에 필요한 의존성이 정확히 설치되어 있으면 재사용하고, PySide6/Qt 버전 충돌이나 의존성 누락 시 `Windows_결과/private_build_packages`에 프로젝트 전용 패키지를 설치하여 시스템/user site-packages와 분리한 채 PyInstaller를 실행합니다. 기존 전역 Python 패키지는 설치·삭제·업그레이드하지 않습니다.
+**자체서명 Authenticode는 Windows의 공인 발행자 신뢰나 SmartScreen 평판을 자동 확보하지 않습니다.** 표준 Capture형 내부 서명 배포 후보로 분류하고, 최종 운영 승인/실제 사용자 문서 처리는 별도로 확인합니다. 공인 신뢰가 필요한 외부 배포는 적절한 공인 코드서명 인증서를 사용해야 합니다.
 
-실패 단계는 `Windows_결과/WINDOWS_BUILD_RESULT.json`으로 확인합니다. 의존성 문제는 `01_dependencies.log`, PyInstaller는 `02_pyinstaller.log`, 실행 확인은 `03_runtime.log`, 공식 그룹서명은 `04_signing.log`에 구분해 기록합니다. 본 저장소의 검증은 소스 단위검사이며, Windows 실빌드·서명 완료를 의미하지 않습니다.
-
-### Windows 배치파일 호환성
-
-공식 소스의 `*.bat` 6개는 UTF-8(BOM 없음) + Windows CRLF 줄바꿈을 사용하며, 시작 시 코드페이지 65001을 지정합니다. LF 전용 배치파일과 혼용하지 마세요. `EXE_빌드.bat`은 Python 3.12 x64를 확인하고 오류코드를 반환합니다. 배포 ZIP 교체 실패 시 이전 `dist` 폴더를 복원하도록 소스 파이프라인을 보완했습니다. 실제 Windows `cmd.exe`, PyInstaller, 서명 및 GUI 확인은 별도 검증이 필요합니다.
-
-### 서명 정책 차단 대응 (Windows)
-
-공식 `RELEASE_MIN` 빌드는 서명 전 `00_signing_preflight.log`에서 `CN=Sunrise Group` 인증서(개인키 포함) 및 승인된 `SUNRISE_TIMESTAMP_URL` HTTPS 설정을 확인합니다. 서명 스크립트는 `SOURCE_AUDIT.json` SHA256을 재확인한 다음 **서명 단계의 PowerShell 자식 프로세스에만** `-ExecutionPolicy Bypass`를 적용하여 실행합니다. Windows의 `MachinePolicy`/`UserPolicy` 그룹 정책은 우회하지 않고, 시스템 전체 실행 정책을 변경하지 않습니다. 서명/타임스탬프가 없거나 검증에 실패하면 공식 ZIP은 승격하지 않습니다. Windows 사용자 실빌드에서는 PyInstaller와 startup smoke가 PASS했으나, 공식 Authenticode·타임스탬프는 추가 확인이 필요합니다.
+기존 Windows PC에서 PyInstaller 및 frozen startup 검사는 PASS했으나, 이 소스의 신규 인증서 생성/서명/최종 ZIP은 Windows 실제 환경에서 다시 확인해야 합니다.

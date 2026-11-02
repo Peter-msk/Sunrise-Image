@@ -1,0 +1,64 @@
+name: Windows EXE signing verification
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'build_windows.py'
+      - 'sign_release.ps1'
+      - 'SOURCE_AUDIT.json'
+      - '.github/workflows/windows-build-validation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-signing:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout current source
+        uses: actions/checkout@v4
+      - name: Install Python 3.12 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+      - name: Verify Windows build toolchain
+        shell: pwsh
+        run: |
+          python -c "import sys,struct; print(sys.version); assert sys.version_info[:2]==(3,12) and struct.calcsize('P')==8"
+          $ErrorActionPreference = 'Stop'
+          Get-Command New-SelfSignedCertificate,Set-AuthenticodeSignature,Get-AuthenticodeSignature | Format-Table Name,Source
+      - name: Build, auto-create or reuse cert, sign and package
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item Env:SUNRISE_TIMESTAMP_URL -ErrorAction SilentlyContinue
+          python -u build_windows.py --profile RELEASE_MIN
+          if ($LASTEXITCODE -ne 0) { throw "RELEASE_MIN returned $LASTEXITCODE" }
+      - name: Verify signed bytes and group ZIP layout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $build = Get-Content -Raw 'Windows_결과/WINDOWS_BUILD_RESULT.json' | ConvertFrom-Json
+          $sig = Get-Content -Raw 'Windows_결과/WINDOWS_SIGNING_RESULT.json' | ConvertFrom-Json
+          if ($build.status -ne 'PASS' -or $sig.signer_subject -ne 'CN=Sunrise Group') { throw 'Unsigned or invalid build result' }
+          $exe = 'dist/SunriseImage/SunriseImage.exe'
+          $actual = (Get-FileHash -Algorithm SHA256 $exe).Hash
+          if ($actual -ne $build.executable_sha256 -or $actual -ne $sig.executable_sha256_after_signing) { throw 'Signed hash mismatch' }
+          $zpath = 'release/Sunrise_Image.zip'
+          if (-not (Test-Path $zpath)) { throw 'Missing output ZIP' }
+          $z = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zpath).Path)
+          try {
+            $names = $z.Entries.FullName
+            if ('Sunrise Group/Sunrise Image/SunriseImage.exe' -notin $names) { throw 'Missing group-layout executable' }
+          } finally { $z.Dispose() }
+          Write-Output ('Windows self-signed EXE and ZIP PASS; SHA256=' + $actual)
+      - name: Write sanitized verification summary
+        if: always()
+        shell: pwsh
+        run: |
+          $result = 'Windows_결과/WINDOWS_BUILD_RESULT.json'
+          if (Test-Path $result) { Get-Content -Raw $result | Write-Output }
+          # No private keys, PFX, binaries or generated release ZIP uploaded to GitHub.
