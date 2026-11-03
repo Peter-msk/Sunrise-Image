@@ -68,6 +68,28 @@ jobs:
             if ('Sunrise Group/Sunrise Image/SunriseImage.exe' -notin $names) { throw 'Missing group-layout executable' }
           } finally { $z.Dispose() }
           Write-Output ('Windows new-cert-per-build signed EXE and ZIP PASS; SHA256=' + $actual)
+      - name: Reproduce Korean-path CP949 signer against existing built EXE (no recompilation)
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: 'cp949'
+          PYTHONUTF8: '0'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item Env:SUNRISE_TIMESTAMP_URL -ErrorAction SilentlyContinue
+          $korean = Join-Path $env:RUNNER_TEMP '0_테스트'
+          New-Item -ItemType Directory -Force $korean | Out-Null
+          $exe = Join-Path $korean 'SunriseImage.exe'
+          Copy-Item 'dist/SunriseImage/SunriseImage.exe' $exe
+          $audit = Join-Path $korean 'Windows_결과'
+          New-Item -ItemType Directory -Force $audit | Out-Null
+          $report = Join-Path $audit 'WINDOWS_SIGNING_RESULT.json'
+          python -S capture_signing.py --executable $exe --audit-dir $audit --report $report
+          if ($LASTEXITCODE -ne 0) { throw 'Korean-path CP949 signing failed' }
+          $sig = Get-Content -Raw $report | ConvertFrom-Json
+          $real = (Get-FileHash -Algorithm SHA256 $exe).Hash
+          if ($sig.executable_sha256_after_signing -ne $real) { throw 'CP949 signer produced incorrect EXE hash' }
+          if ($sig.certificate_selection_policy -ne 'ALWAYS_NEW_PER_SIGNING') { throw 'Old cert was reused' }
+          Write-Output 'PASS: Korean path, CP949 redirected output, fresh certificate, SignTool, signed EXE SHA256'
       - name: Write sanitized verification summary
         if: always()
         shell: pwsh

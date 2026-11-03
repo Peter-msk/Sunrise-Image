@@ -81,3 +81,7 @@ Copyright © 2026 Sunrise Group. All rights reserved.
 기존 인증서는 그대로 보존합니다. 개인키는 내보내지 않고 기존 인증서 저장소·Trusted Root·전역 Python·PowerShell 실행 정책은 변경하지 않습니다. `SUNRISE_TIMESTAMP_URL`은 선택사항입니다. `WINDOWS_SIGNING_RESULT.json`에 `certificate_created=true`, `certificate_selection_policy=ALWAYS_NEW_PER_SIGNING`, 서명에 사용한 신규 지문과 EXE SHA256을 기록합니다. 이전 버전의 `SUNRISE_SIGNING_IDENTITY.json`과 `SUNRISE_SIGNING_THUMBPRINT` 설정은 새 서명 과정에서 사용하지 않습니다.
 
 **유의:** 빌드마다 새 인증서를 만들면 서명자 지문이 계속 바뀌므로 발행자 신뢰의 연속성이 없습니다. 자체서명은 공인 CA 신뢰나 Windows SmartScreen 통과를 보증하지 않으며, 예전 인증서/개인키도 삭제하지 않으므로 시간이 지나면 Windows 사용자 인증서 저장소에 여러 인증서가 누적됩니다. 외부 공인 배포를 위한 코드서명과 혼동해서는 안 됩니다.
+
+### Korean Windows codepage compatibility
+
+The signing subprocess decodes native certreq/certutil/SignTool output using UTF-8 or the Windows ANSI/OEM codepage and writes UTF-8 logs, including when the source and audit paths contain Korean characters. No system locale/codepage or existing certificates are changed.

@@ -4,7 +4,7 @@ Private keys never leave the Windows CurrentUser\\My store. No .venv, no persist
 policy changes, no TrustedRoot changes and no required timestamp service.
 """
 from __future__ import annotations
-import argparse, hashlib, json, os, re, shutil, ssl, struct, subprocess, sys
+import argparse, hashlib, json, locale, os, re, shutil, ssl, struct, subprocess, sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -31,12 +31,46 @@ def _find_program(name):
     raise RuntimeError('Windows SDK signtool.exe unavailable. Install Windows SDK Signing Tools.')
 
 
+def _prepare_utf8_log_streams():
+    """Ensure the parent build's UTF-8 log remains writable on CP949 Windows.
+
+    Redirected Python stdout commonly defaults to the local ANSI codepage.
+    It must not fail when a native tool emits Unicode replacement characters
+    or when the working folder contains Korean names. This affects this
+    process's logs only; it does not change Windows console or system locale.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='backslashreplace')
+
+
+def _decode_native_output(raw: bytes) -> str:
+    """Decode native Windows command output without inventing U+FFFD chars.
+
+    `certreq`, `certutil` and `signtool` may emit ANSI/OEM output (CP949 on
+    Korean Windows), whereas CI runners may emit UTF-8. The output bytes are
+    not guaranteed to match Python's redirected stdout encoding.
+    """
+    if not raw:
+        return ''
+    if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
+        return raw.decode('utf-16', errors='backslashreplace')
+    encodings = ('utf-8-sig', locale.getencoding(), 'mbcs', 'cp949', 'cp437')
+    for encoding in dict.fromkeys(encodings):
+        try:
+            return raw.decode(encoding, errors='strict')
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode('utf-8', errors='backslashreplace')
+
+
 def _run(argv, cwd):
+    _prepare_utf8_log_streams()
     cmd = [str(x) for x in argv]
     print('[sign cmd] ' + subprocess.list2cmdline(cmd), flush=True)
     r = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                        timeout=100, check=False)
-    out = r.stdout.decode('utf-8', errors='replace')
+    out = _decode_native_output(r.stdout)
     if out:
         print(out.rstrip(), flush=True)
     if r.returncode:
