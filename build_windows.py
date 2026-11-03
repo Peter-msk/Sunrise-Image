@@ -349,7 +349,69 @@ def write_executable_info(path):
     path.write_text(f"VSVersionInfo(ffi=FixedFileInfo(filevers={fixed_info!r}, prodvers={fixed_info!r}, mask=0x3f, flags=0, OS=0x40004, fileType=1, subtype=0, date=(0,0)), kids=[StringFileInfo([StringTable('040904B0', [{strings}])]), VarFileInfo([VarStruct('Translation', [1033, 1200])])])", encoding='utf-8')
 
 
-def main(package_only=False, profile=DEFAULT_PROFILE):
+# Exact compatibility with the previously built user's Windows artifact. The frozen
+# application/asset/requirements SHA256 inputs are unchanged. Only the Windows
+# build runner and signer changed, so a signing-stage FAILED build may be resumed.
+_RESUME_PREVIOUS_SOURCE_CHECKPOINT = '8f3884e850912310b1b47a44d968d7aefb2307ecf7edd7eda1a2f0d792327e10'
+_RESUME_STABLE_INPUTS_CHECKPOINT = '466f7b93ff9ad0e4e19cc3f94cce3c54acf9f9831268f58bba74f7fb1b0a7b65'
+
+
+def find_verified_signing_resume(source):
+    """Find ONLY the preserved, unsigned staging EXE from a failed signing run.
+
+    No arbitrary EXE selection, no existing published dist/release reuse, and
+    no bypass of changed runtime source inputs. The old staging tree is never
+    modified; caller makes a private copy before signing.
+    """
+    runtime_inputs = {k: v for k, v in source['sha256'].items()
+                      if k not in ('capture_signing.py', 'build_windows.py', 'SIGNING_RETRY.bat')}
+    observed = hashlib.sha256(json.dumps(runtime_inputs, sort_keys=True).encode('utf-8')).hexdigest()
+    if observed != _RESUME_STABLE_INPUTS_CHECKPOINT:
+        raise RuntimeError('Signing retry refused: application or pinned dependencies changed; rebuild required.')
+    result = AUDIT / 'WINDOWS_BUILD_RESULT.json'
+    if not result.is_file():
+        raise RuntimeError('Signing retry requires the prior WINDOWS_BUILD_RESULT.json for a failed signing stage.')
+    previous = json.loads(result.read_text(encoding='utf-8'))
+    # Preserve the original signing failure across further retry attempts.
+    if previous.get('mode') == 'resume_failed_signing':
+        preserved = AUDIT / 'WINDOWS_BUILD_PREVIOUS_SIGNING_FAILURE.json'
+        if not preserved.is_file():
+            raise RuntimeError('Previous signing failure record missing; cannot safely retry.')
+        previous = json.loads(preserved.read_text(encoding='utf-8'))
+    stages = previous.get('stages', {})
+    if (previous.get('status') != 'FAILED'
+            or previous.get('failed_stage') != 'signing'
+            or previous.get('profile') != 'RELEASE_MIN'
+            or previous.get('mode') != 'build_and_package'
+            or stages.get('build') != 'PASS'
+            or stages.get('windows_runtime') != 'PASS'
+            or stages.get('licenses') != 'PASS'):
+        raise RuntimeError('Signing retry refused: previous build, runtime and licenses must have PASS and signing FAIL.')
+    stage_string = previous.get('staging_path_if_available')
+    if not stage_string:
+        raise RuntimeError('Signing retry refused: previous staging directory not recorded.')
+    previous_stage = Path(stage_string).resolve()
+    # Do not allow report-provided paths outside this product's build_staging.
+    if previous_stage.parent != (AUDIT / 'build_staging').resolve():
+        raise RuntimeError('Signing retry refused: staging directory does not belong to this build.')
+    old_dist = previous_stage / 'SunriseImage'
+    exe = old_dist / ENTRY_EXECUTABLE
+    package = old_dist / 'package_info.json'
+    if not exe.is_file() or not package.is_file() or not (old_dist / 'licenses' / 'THIRD_PARTY_NOTICES.md').is_file():
+        raise RuntimeError('Signing retry refused: previous complete EXE/licenses/package identity missing.')
+    identity = json.loads(package.read_text(encoding='utf-8'))
+    if (identity.get('app_id') != APP_ID or identity.get('package_kind') != PACKAGE_KIND
+            or identity.get('entry_executable') != ENTRY_EXECUTABLE
+            or identity.get('source_binding') != 'built_from_checkpoint'
+            or identity.get('source_checkpoint') != _RESUME_PREVIOUS_SOURCE_CHECKPOINT):
+        raise RuntimeError('Signing retry refused: previous EXE source binding mismatch.')
+    from capture_signing import _pe_certificate_table
+    if _pe_certificate_table(exe):
+        raise RuntimeError('Signing retry refused: previous staged EXE is already signed.')
+    return old_dist, identity['source_checkpoint']
+
+
+def main(package_only=False, profile=DEFAULT_PROFILE, resume_signing=False):
     AUDIT.mkdir(exist_ok=True)
     summary = {
         'status': 'FAILED',
@@ -359,7 +421,7 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
         'update_notice_integration': 'NOT_APPLICABLE (product has no update or notice feature)',
         'platform': platform.system(),
         'architecture': platform.machine(),
-        'mode': 'package_existing_executable' if package_only else 'build_and_package',
+        'mode': 'resume_failed_signing' if resume_signing else 'package_existing_executable' if package_only else 'build_and_package',
         'stages': {},
     }
     stage = 'platform'
@@ -369,6 +431,8 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
     try:
         if profile not in {'BUILD_MIN', 'RELEASE_MIN'}:
             raise ValueError('Unknown build profile')
+        if resume_signing and (package_only or profile != 'RELEASE_MIN'):
+            raise ValueError('Signing retry is only supported for RELEASE_MIN without --package-only.')
         if platform.system() != 'Windows':
             raise RuntimeError('Windows EXE must be built on Windows. No Windows artifact was generated.')
         if sys.version_info[:2] != (3, 12) or struct.calcsize('P') != 8 or platform.machine().lower() not in {'amd64', 'x86_64'}:
@@ -380,7 +444,20 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
             stage = 'signing_preflight'
             check_signing_prerequisites()
             summary['stages']['signing_preflight'] = 'PASS'
-        if package_only:
+        if resume_signing:
+            stage = 'resume_source_binding'
+            old_dist, previous_checkpoint = find_verified_signing_resume(source)
+            preserved = AUDIT / 'WINDOWS_BUILD_PREVIOUS_SIGNING_FAILURE.json'
+            if not preserved.is_file():
+                shutil.copy2(AUDIT / 'WINDOWS_BUILD_RESULT.json', preserved)
+            staged_root = AUDIT / 'resume_staging' / uuid.uuid4().hex
+            built_dist = staged_root / 'SunriseImage'
+            shutil.copytree(old_dist, built_dist)
+            summary['stages']['dependencies'] = 'REUSED_PASS (previous Windows run; no installation)'
+            summary['stages']['build'] = 'REUSED_PASS (previous unsigned EXE; no PyInstaller)'
+            summary['previous_build_source_checkpoint'] = previous_checkpoint
+            print('[INFO] Resuming certified signing only from preserved unsigned EXE. No PyInstaller or pip.', flush=True)
+        elif package_only:
             if not (DIST / 'SunriseImage.exe').is_file():
                 raise RuntimeError('Existing dist/SunriseImage/SunriseImage.exe is missing. Run EXE_빌드.bat first.')
             staged_root = AUDIT / 'package_staging' / uuid.uuid4().hex
@@ -458,7 +535,11 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
         identity = {'app_id': APP_ID,
                     'package_kind': PACKAGE_KIND, 'entry_executable': ENTRY_EXECUTABLE,
                     'source_checkpoint': source_checkpoint(source),
-                    'source_binding': 'unverified_existing_exe' if package_only and profile == 'BUILD_MIN' else 'built_from_checkpoint'}
+                    'source_binding': ('unverified_existing_exe' if package_only and profile == 'BUILD_MIN'
+                                       else 'verified_previous_app_inputs_signing_resume' if resume_signing
+                                       else 'built_from_checkpoint')}
+        if resume_signing:
+            identity['built_source_checkpoint'] = previous_checkpoint
         (built_dist / 'package_info.json').write_text(json.dumps(identity, ensure_ascii=False, indent=2), encoding='utf-8')
         summary['stages']['package_identity'] = 'PASS'
         executable_hash = hashlib.sha256(exe.read_bytes()).hexdigest()
@@ -466,7 +547,7 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
         report = AUDIT / 'WINDOWS_RUNTIME_CHECK.json'
         if report.exists():
             report.unlink()
-        print('1/2: Checking existing Windows executable...' if package_only else '3/3: Checking frozen Windows runtime...', flush=True)
+        print('1/2: Checking existing Windows executable...' if package_only or resume_signing else '3/3: Checking frozen Windows runtime...', flush=True)
         command([str(exe), '--startup-smoke', '--report', str(report)], '03_runtime.log')
         checked = json.loads(report.read_text(encoding='utf-8'))
         if checked.get('status') != 'PASS' or not checked.get('windows_verified') or not checked.get('frozen') or checked.get('program') != APP_NAME or checked.get('app_id') != APP_ID or checked.get('package_kind') != PACKAGE_KIND:
@@ -474,11 +555,14 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
         if hashlib.sha256(exe.read_bytes()).hexdigest() != executable_hash:
             raise RuntimeError('Executable changed during runtime check.')
         summary['stages']['windows_runtime'] = 'PASS'
-        if package_only:
-            print('2/2: Finalizing licenses and release ZIP...', flush=True)
+        if package_only or resume_signing:
+            print('2/2: Signing and packaging verified existing EXE...', flush=True)
         stage = 'licenses'
-        collect_licenses(built_dist / 'licenses')
-        summary['stages']['licenses'] = 'PASS'
+        if resume_signing:
+            summary['stages']['licenses'] = 'REUSED_PASS (previous successful build)'
+        else:
+            collect_licenses(built_dist / 'licenses')
+            summary['stages']['licenses'] = 'PASS'
         stage = 'signing'
         if profile == 'RELEASE_MIN':
             signing = sign_executable(exe)
@@ -594,6 +678,7 @@ def main(package_only=False, profile=DEFAULT_PROFILE):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--package-only', action='store_true', help='Package an existing EXE after a fresh runtime check, without reinstalling or compiling.')
+    parser.add_argument('--resume-signing', action='store_true', help='Sign and package the prior verified signing-stage FAILED build; no PyInstaller/pip.')
     parser.add_argument('--profile', choices=['BUILD_MIN', 'RELEASE_MIN'], default=DEFAULT_PROFILE)
     args = parser.parse_args()
-    sys.exit(main(args.package_only, args.profile))
+    sys.exit(main(args.package_only, args.profile, args.resume_signing))

@@ -85,3 +85,27 @@ Copyright © 2026 Sunrise Group. All rights reserved.
 ### Korean Windows codepage compatibility
 
 The signing subprocess decodes native certreq/certutil/SignTool output using UTF-8 or the Windows ANSI/OEM codepage and writes UTF-8 logs, including when the source and audit paths contain Korean characters. No system locale/codepage or existing certificates are changed.
+
+
+## Windows 서명만 재시도 (이전 빌드의 서명 단계만 실패한 경우)
+
+`WINDOWS_BUILD_RESULT.json`에서 `failed_stage=signing`, `stages.build=PASS`,
+`stages.windows_runtime=PASS`, `stages.licenses=PASS`이고
+`Windows_결과/build_staging/<실패한 빌드 식별자>/SunriseImage/SunriseImage.exe`가
+남아 있으면 **`SIGNING_RETRY.bat`**을 실행할 수 있습니다.
+
+이 모드는 정확히 호환되는 직전 소스 체크포인트의 **미서명 EXE**만 사용합니다.
+기존 폴더의 `Windows_결과`, `build_staging`, `dist`, `release`를 임의로 삭제하지
+않습니다. 패치 파일을 같은 `Source/Sunrise_Image`에 덮어쓴 뒤 실행합니다.
+새 Python 패키지 설치와 PyInstaller 컴파일을 수행하지 않으며,
+기존 staging 폴더의 내용을 복제한 뒤 frozen startup 재확인 → **새 인증서**
+발급 → 서명 → ZIP 무결성 검사·배포 순서만 실행합니다.
+기존 서명·기존 인증서 검색 및 재사용은 여전히 금지합니다.
+
+한글 Windows의 `인증서 해시(sha1)`과 certreq의
+`-----BEGIN NEW CERTIFICATE REQUEST-----` PEM 파일에 포함된 **실제 DER 인증서**를
+지원합니다. 인증서의 SHA-1 지문을 파일에서 계산하고 등록 출력 값과 대조합니다.
+서로 다르면 서명하지 않고 실패 처리합니다.
+
+재시도가 거부되면 `WINDOWS_결과/WINDOWS_BUILD_RESULT.json`의 이유를 확인하고,
+이전 staging을 수동 조작하지 말고 원래 `EXE_빌드.bat`으로 재빌드합니다.

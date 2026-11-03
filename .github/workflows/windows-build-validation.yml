@@ -68,6 +68,28 @@ jobs:
             if ('Sunrise Group/Sunrise Image/SunriseImage.exe' -notin $names) { throw 'Missing group-layout executable' }
           } finally { $z.Dispose() }
           Write-Output ('Windows new-cert-per-build signed EXE and ZIP PASS; SHA256=' + $actual)
+      - name: Verify Korean certificate SHA1 and certreq NEW CERTIFICATE REQUEST PEM (no recompilation)
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import json
+          from pathlib import Path
+          import capture_signing as signer
+          result = json.loads(Path('Windows_결과/WINDOWS_SIGNING_RESULT.json').read_text('utf-8'))
+          cert = Path('Windows_결과/cert_provisioning/SunriseGroup_SelfSigned_CodeSigning.cer')
+          raw = cert.read_bytes()
+          if not raw.startswith((b'-----BEGIN NEW CERTIFICATE REQUEST-----', b'-----BEGIN CERTIFICATE-----', b'0')):
+              raise RuntimeError('Unexpected certreq certificate file container')
+          korean = '인증서 해시(sha1): ' + result['signer_thumbprint'].lower()
+          thumb = signer._fresh_certificate_thumbprint(cert, korean)
+          if thumb != result['signer_thumbprint']:
+              raise RuntimeError('Korean localized SHA1 or NEW PEM header did not match newly signed EXE')
+          print('PASS: Korean SHA1 label, certreq PEM certificate, fresh SHA1 fingerprint == SignTool signer')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Korean certificate parsing regression failed' }
       - name: Reproduce Korean-path CP949 signer against existing built EXE (no recompilation)
         shell: pwsh
         env:

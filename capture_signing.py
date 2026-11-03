@@ -4,7 +4,7 @@ Private keys never leave the Windows CurrentUser\\My store. No .venv, no persist
 policy changes, no TrustedRoot changes and no required timestamp service.
 """
 from __future__ import annotations
-import argparse, hashlib, json, locale, os, re, shutil, ssl, struct, subprocess, sys
+import argparse, base64, hashlib, json, locale, os, re, shutil, struct, subprocess, sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -78,40 +78,79 @@ def _run(argv, cwd):
     return out
 
 
-def _fresh_certificate_thumbprint(certificate: Path, installation_output: str = '') -> str:
-    """Fingerprint the *just created* certificate, never enumerate old certs.
+def _registered_sha1_fingerprint(installation_output: str) -> str | None:
+    """Extract SHA1 from THIS certutil -addstore call, with no locale-specific label.
 
-    Windows certreq may emit DER, PEM, UTF-16 PEM or other certificate
-    containers. For non-DER containers use the certutil **registration output
-    for this exact new file** (not `certutil -store` / subject search).
+    Windows certutil translates the words before ``(sha1)``. English reports
+    ``Cert Hash(sha1):``; Korean reports ``인증서 해시(sha1):``. A single clear
+    fingerprint tied to this registration is the only acceptable fallback.
     """
-    # Registration output from certutil -addstore is tied to THIS certificate
-    # file, not a subject/store enumeration. Prefer its canonical X.509 SHA1.
-    values = []
+    candidates = []
     for line in installation_output.splitlines():
-        match = re.search(r'(?i)^\s*(?:Cert Hash\s*\(sha1\)|Thumbprint)\s*:\s*([0-9a-f]{40})\s*$', line)
+        match = re.fullmatch(
+            r'(?i)\s*[^:\r\n]{0,100}?\(\s*sha\s*-?\s*1\s*\)\s*:\s*([0-9a-f]{40})\s*',
+            line,
+        )
         if match:
-            values.append(match.group(1).upper())
-    distinct = list(dict.fromkeys(values))
-    if len(distinct) == 1:
-        return distinct[0]
-    if len(distinct) > 1:
-        raise RuntimeError('Ambiguous thumbprints in freshly issued certificate registration output')
+            candidates.append(match.group(1).upper())
+    unique = list(dict.fromkeys(candidates))
+    if len(unique) > 1:
+        raise RuntimeError('Conflicting SHA1 fingerprints in this new certificate registration')
+    return unique[0] if unique else None
+
+
+def _new_certificate_der(certificate: Path) -> bytes | None:
+    """Read the new *X.509 certificate* bytes independently of Windows locale.
+
+    Windows certreq -new with RequestType=Cert can label a real certificate
+    ``-----BEGIN NEW CERTIFICATE REQUEST-----`` even though the decoded body
+    is an X.509 certificate (as in the submitted Korean Windows failure).
+    Never SHA1 the PEM text; the SignTool /sha1 value is SHA1 of the DER body.
+    """
     raw = certificate.read_bytes()
-    der = raw
-    if raw[:1] != b'\x30':
-        der = None
-        for encoding in ('utf-8-sig', 'utf-16', 'utf-16-le', 'utf-16-be'):
-            try:
-                text = raw.decode(encoding)
-                if '-----BEGIN CERTIFICATE-----' in text:
-                    der = ssl.PEM_cert_to_DER_cert(text)
-                    break
-            except (UnicodeError, ValueError):
-                continue
-    if der is not None and len(der) >= 128 and der[:1] == b'\x30':
-        return hashlib.sha1(der).hexdigest().upper()
-    raise RuntimeError('Cannot obtain the newly issued certificate thumbprint from certutil registration or DER/PEM; public certificate prefix=' + raw[:20].hex())
+    if raw[:1] == b'\x30' and len(raw) >= 128:
+        return raw
+    try:
+        text = raw.decode('utf-8-sig')
+    except UnicodeError:
+        try:
+            text = raw.decode('utf-16')
+        except UnicodeError:
+            return None
+    match = re.fullmatch(
+        r'-----BEGIN (?P<label>CERTIFICATE|NEW CERTIFICATE REQUEST)-----\s+'
+        r'(?P<body>[A-Za-z0-9+/=\s]+)-----END (?P=label)-----',
+        text.strip(),
+    )
+    if not match:
+        return None
+    try:
+        der = base64.b64decode(''.join(match.group('body').split()), validate=True)
+    except (ValueError, base64.binascii.Error):
+        return None
+    return der if len(der) >= 128 and der[:1] == b'\x30' else None
+
+
+def _fresh_certificate_thumbprint(certificate: Path, installation_output: str = '') -> str:
+    """Use ONLY the newly issued certificate, never enumerate older certs.
+
+    Prefer the SHA1 of its own DER X.509 data; cross-check the new certutil
+    registration's (sha1) field when available, regardless of language.
+    """
+    registration_thumb = _registered_sha1_fingerprint(installation_output)
+    der = _new_certificate_der(certificate)
+    if der is not None:
+        file_thumb = hashlib.sha1(der).hexdigest().upper()
+        if registration_thumb and registration_thumb != file_thumb:
+            raise RuntimeError('New certificate DER SHA1 disagrees with certutil registration')
+        return file_thumb
+    if registration_thumb:
+        return registration_thumb
+    raise RuntimeError(
+        'Cannot determine SHA1 of newly issued certificate from DER/PEM or certutil '
+        '(both English and localized SHA1 output supported); public prefix='
+        + certificate.read_bytes()[:20].hex()
+    )
 
 
 def _create_certificate(certreq, certutil, audit, root):
